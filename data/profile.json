@@ -1,0 +1,105 @@
+{
+  "personal": {
+    "full_name": "Mohit Kumar",
+    "email": "mohitkrgupta.13.05@gmail.com",
+    "phone": "6299329495",
+    "linkedin_url": "https://www.linkedin.com/in/mohit-kumar",
+    "github_url": "https://github.com/mohit04",
+    "current_location": "Delhi",
+    "willing_to_relocate": true
+  },
+  "education": {
+    "class_10_percentage": 91.2,
+    "class_12_percentage": 61.4,
+    "degree": "B.Tech",
+    "specialization": "Computer Science Engineering",
+    "college_name": "State Institute of Engineering and Technology, Nilokheri",
+    "college_percentage": 82.0,
+    "gpa": "8.19/10.00",
+    "graduation_year": 2024
+  },
+  "preferences": {
+    "preferred_locations": [
+      "Delhi / Delhi NCR",
+      "Gurugram / Gurgaon",
+      "Noida",
+      "Kolkata",
+      "Pune",
+      "Bengaluru / Bangalore",
+      "Mumbai",
+      "Other locations in India"
+    ],
+    "work_modes": ["Remote", "Hybrid", "On-site"],
+    "notice_period_days": 15,
+    "notice_period_text": "15 days (less than 30 days)",
+    "expected_ctc_lpa": "9-10 LPA",
+    "expected_ctc_min": 9.0,
+    "expected_ctc_max": 10.0,
+    "is_ctc_negotiable": true
+  },
+  "target_roles": [
+    "Data Analyst",
+    "Business Analyst",
+    "Risk Analyst",
+    "Fraud Analyst",
+    "Compliance Analyst",
+    "Operations Analyst",
+    "Product Analyst",
+    "Reporting Analyst",
+    "Junior Analytics Engineer",
+    "Analytics Engineer",
+    "BI Analyst"
+  ],
+  "experience": {
+    "total_years": 1.8,
+    "target_experience_min_years": 0.0,
+    "target_experience_max_years": 2.5,
+    "positions": [
+      {
+        "title": "Risk Analyst",
+        "company": "Cosmofeed (SuperProfile)",
+        "duration": "Oct 2025 – Present",
+        "responsibilities": "Built and deployed production-grade risk operations dashboard to detect self-transactions, review products, flag suspicious activity, and streamline creator compliance reviews. Developed Python and Excel workflows for creator records and payout data."
+      },
+      {
+        "title": "Cloud Ops. Analyst",
+        "company": "ALIANDO (The Henson Group)",
+        "duration": "April 2025 – Sept 2025",
+        "responsibilities": "Managed Microsoft Cloud licensing and CSP operations. Automated operational workflows using Microsoft Partner Center and Azure."
+      },
+      {
+        "title": "Software Engineer Intern",
+        "company": "Brainwave Law",
+        "duration": "Aug 2024 – Feb 2025",
+        "responsibilities": "Engineered AI-driven legal tools with LLMs (OpenAI, Gemini), reducing document processing time by 30%. Delivered high-performance React chatbot with Framer Motion UI."
+      }
+    ]
+  },
+  "skills": [
+    "Python",
+    "SQL",
+    "Pandas",
+    "NumPy",
+    "Data Cleaning",
+    "Data Transformation",
+    "EDA",
+    "Statistical Analysis",
+    "Power BI",
+    "Excel",
+    "Dashboard Development",
+    "Business Reporting",
+    "PostgreSQL",
+    "MySQL",
+    "SQLite",
+    "Fraud Detection",
+    "Settlement Validation",
+    "Transaction Monitoring",
+    "Disputes",
+    "Compliance & Pattern Analysis",
+    "BeautifulSoup",
+    "Selenium",
+    "Git",
+    "GitHub",
+    "REST APIs"
+  ]
+}

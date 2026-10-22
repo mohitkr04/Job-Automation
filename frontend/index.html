@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoApply — Local-First Job Application Automation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="brand-logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">AutoApply <span class="badge-local">Local-First</span></h1>
+          <p class="brand-subtitle">Multi-Platform Job Discovery & Verified Application Automation</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="resume-pill" id="resumeStatusPill" title="Local resume attached">
+          <span class="status-dot dot-green"></span>
+          <span id="resumePillText">Resume: Mohit Kumar (PDF)</span>
+        </div>
+        <button class="btn btn-secondary" id="btnOpenProfile">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+          Candidate Profile
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="app-main">
+      <!-- Section: Platform Cards Grid -->
+      <section class="section-platforms">
+        <div class="section-title-row">
+          <div>
+            <h2 class="section-title">Job Platforms</h2>
+            <p class="section-desc">Independent controls for discovery, match scoring, and safe application execution.</p>
+          </div>
+          <div class="live-indicator">
+            <span class="pulse-ring"></span>
+            <span class="live-text">SSE Live Feed Active</span>
+          </div>
+        </div>
+
+        <div class="platforms-grid" id="platformsGrid">
+          <!-- Naukri Card -->
+          <div class="platform-card" id="card-naukri">
+            <div class="card-top">
+              <div class="platform-meta">
+                <div class="platform-icon icon-naukri">N</div>
+                <div>
+                  <h3 class="platform-name">Naukri</h3>
+                  <div class="connection-badge status-disconnected" id="conn-naukri">Disconnected</div>
+                </div>
+              </div>
+              <div class="automation-badge status-idle" id="auto-naukri">Idle</div>
+            </div>
+
+            <div class="card-step-info">
+              <div class="step-label">Current Step:</div>
+              <div class="step-text" id="step-naukri">Ready to start discovery</div>
+            </div>
+
+            <div class="metrics-grid">
+              <div class="metric-item">
+                <div class="metric-val" id="metric-naukri-discovered">0</div>
+                <div class="metric-label">Discovered</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val" id="metric-naukri-eligible">0</div>
+                <div class="metric-label">Eligible</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-success" id="metric-naukri-applied">0</div>
+                <div class="metric-label">Applied</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-danger" id="metric-naukri-failed">0</div>
+                <div class="metric-label">Failed</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-muted" id="metric-naukri-skipped">0</div>
+                <div class="metric-label">Skipped (Dup)</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val" id="metric-naukri-time">Never</div>
+                <div class="metric-label">Last Run</div>
+              </div>
+            </div>
+
+            <div class="card-actions">
+              <button class="btn btn-primary btn-start" onclick="startPlatform('naukri')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                Start Naukri
+              </button>
+              <button class="btn btn-outline btn-stop" onclick="stopPlatform('naukri')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"></rect></svg>
+                Stop Naukri
+              </button>
+              <button class="btn btn-icon" title="Test Connection" onclick="testConnection('naukri')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- LinkedIn Card -->
+          <div class="platform-card" id="card-linkedin">
+            <div class="card-top">
+              <div class="platform-meta">
+                <div class="platform-icon icon-linkedin">in</div>
+                <div>
+                  <h3 class="platform-name">LinkedIn</h3>
+                  <div class="connection-badge status-disconnected" id="conn-linkedin">Disconnected</div>
+                </div>
+              </div>
+              <div class="automation-badge status-idle" id="auto-linkedin">Idle</div>
+            </div>
+
+            <div class="card-step-info">
+              <div class="step-label">Current Step:</div>
+              <div class="step-text" id="step-linkedin">Ready to start discovery</div>
+            </div>
+
+            <div class="metrics-grid">
+              <div class="metric-item">
+                <div class="metric-val" id="metric-linkedin-discovered">0</div>
+                <div class="metric-label">Discovered</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val" id="metric-linkedin-eligible">0</div>
+                <div class="metric-label">Eligible</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-success" id="metric-linkedin-applied">0</div>
+                <div class="metric-label">Applied</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-danger" id="metric-linkedin-failed">0</div>
+                <div class="metric-label">Failed</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-muted" id="metric-linkedin-skipped">0</div>
+                <div class="metric-label">Skipped (Dup)</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val" id="metric-linkedin-time">Never</div>
+                <div class="metric-label">Last Run</div>
+              </div>
+            </div>
+
+            <div class="card-actions">
+              <button class="btn btn-primary btn-start" onclick="startPlatform('linkedin')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                Start LinkedIn
+              </button>
+              <button class="btn btn-outline btn-stop" onclick="stopPlatform('linkedin')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"></rect></svg>
+                Stop LinkedIn
+              </button>
+              <button class="btn btn-icon" title="Test Connection" onclick="testConnection('linkedin')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Indeed Card -->
+          <div class="platform-card" id="card-indeed">
+            <div class="card-top">
+              <div class="platform-meta">
+                <div class="platform-icon icon-indeed">indeed</div>
+                <div>
+                  <h3 class="platform-name">Indeed</h3>
+                  <div class="connection-badge status-disconnected" id="conn-indeed">Disconnected</div>
+                </div>
+              </div>
+              <div class="automation-badge status-idle" id="auto-indeed">Idle</div>
+            </div>
+
+            <div class="card-step-info">
+              <div class="step-label">Current Step:</div>
+              <div class="step-text" id="step-indeed">Ready to start discovery</div>
+            </div>
+
+            <div class="metrics-grid">
+              <div class="metric-item">
+                <div class="metric-val" id="metric-indeed-discovered">0</div>
+                <div class="metric-label">Discovered</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val" id="metric-indeed-eligible">0</div>
+                <div class="metric-label">Eligible</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-success" id="metric-indeed-applied">0</div>
+                <div class="metric-label">Applied</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-danger" id="metric-indeed-failed">0</div>
+                <div class="metric-label">Failed</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-muted" id="metric-indeed-skipped">0</div>
+                <div class="metric-label">Skipped (Dup)</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val" id="metric-indeed-time">Never</div>
+                <div class="metric-label">Last Run</div>
+              </div>
+            </div>
+
+            <div class="card-actions">
+              <button class="btn btn-primary btn-start" onclick="startPlatform('indeed')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                Start Indeed
+              </button>
+              <button class="btn btn-outline btn-stop" onclick="stopPlatform('indeed')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"></rect></svg>
+                Stop Indeed
+              </button>
+              <button class="btn btn-icon" title="Test Connection" onclick="testConnection('indeed')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Hirist Card -->
+          <div class="platform-card" id="card-hirist">
+            <div class="card-top">
+              <div class="platform-meta">
+                <div class="platform-icon icon-hirist">H</div>
+                <div>
+                  <h3 class="platform-name">Hirist (Hirest)</h3>
+                  <div class="connection-badge status-disconnected" id="conn-hirist">Disconnected</div>
+                </div>
+              </div>
+              <div class="automation-badge status-idle" id="auto-hirist">Idle</div>
+            </div>
+
+            <div class="card-step-info">
+              <div class="step-label">Current Step:</div>
+              <div class="step-text" id="step-hirist">Ready to start discovery</div>
+            </div>
+
+            <div class="metrics-grid">
+              <div class="metric-item">
+                <div class="metric-val" id="metric-hirist-discovered">0</div>
+                <div class="metric-label">Discovered</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val" id="metric-hirist-eligible">0</div>
+                <div class="metric-label">Eligible</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-success" id="metric-hirist-applied">0</div>
+                <div class="metric-label">Applied</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-danger" id="metric-hirist-failed">0</div>
+                <div class="metric-label">Failed</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val text-muted" id="metric-hirist-skipped">0</div>
+                <div class="metric-label">Skipped (Dup)</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-val" id="metric-hirist-time">Never</div>
+                <div class="metric-label">Last Run</div>
+              </div>
+            </div>
+
+            <div class="card-actions">
+              <button class="btn btn-primary btn-start" onclick="startPlatform('hirist')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                Start Hirist
+              </button>
+              <button class="btn btn-outline btn-stop" onclick="stopPlatform('hirist')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"></rect></svg>
+                Stop Hirist
+              </button>
+              <button class="btn btn-icon" title="Test Connection" onclick="testConnection('hirist')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Application History Ledger -->
+      <section class="section-ledger">
+        <div class="section-title-row">
+          <div>
+            <h2 class="section-title">Application Ledger & Verification</h2>
+            <p class="section-desc">Minimal persistent records with verified outcomes and duplicate prevention.</p>
+          </div>
+          <div class="ledger-actions">
+            <select id="filterPlatform" class="select-control" onchange="loadApplications()">
+              <option value="">All Platforms</option>
+              <option value="naukri">Naukri</option>
+              <option value="linkedin">LinkedIn</option>
+              <option value="indeed">Indeed</option>
+              <option value="hirist">Hirist (Hirest)</option>
+            </select>
+            <select id="filterStatus" class="select-control" onchange="loadApplications()">
+              <option value="">All Statuses</option>
+              <option value="Applied — Verified">Applied — Verified</option>
+              <option value="Manual Action Required">Manual Action Required</option>
+              <option value="Skipped — Duplicate">Skipped — Duplicate</option>
+              <option value="Skipped — Ineligible">Skipped — Ineligible</option>
+              <option value="Failed">Failed</option>
+            </select>
+            <button class="btn btn-secondary" onclick="exportData('csv')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Export CSV
+            </button>
+            <button class="btn btn-secondary" onclick="exportData('json')">
+              Export JSON
+            </button>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="apps-table">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Job Title & Company</th>
+                <th>Platform</th>
+                <th>Match Score</th>
+                <th>Location / Exp</th>
+                <th>Verification Note</th>
+                <th>Discovered</th>
+              </tr>
+            </thead>
+            <tbody id="appsTableBody">
+              <tr>
+                <td colspan="7" class="text-center py-8 text-muted">No applications recorded yet. Start a platform to begin discovery.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modal: Centralized Candidate Profile Editor -->
+    <div class="modal-overlay" id="profileModal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title">Centralized Profile & Preferences</h3>
+          <button class="btn-close" id="btnCloseProfile">&times;</button>
+        </div>
+        <div class="modal-body">
+          <form id="profileForm">
+            <!-- Personal Info -->
+            <div class="form-section-title">Personal Details</div>
+            <div class="form-row grid-2">
+              <div class="form-group">
+                <label>Full Name</label>
+                <input type="text" id="profFullName" class="input-control" required />
+              </div>
+              <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" id="profEmail" class="input-control" required />
+              </div>
+            </div>
+            <div class="form-row grid-2">
+              <div class="form-group">
+                <label>Phone Number</label>
+                <input type="text" id="profPhone" class="input-control" required />
+              </div>
+              <div class="form-group">
+                <label>Current Location</label>
+                <input type="text" id="profLocation" class="input-control" required />
+              </div>
+            </div>
+            <div class="form-row grid-2">
+              <div class="form-group">
+                <label>LinkedIn URL</label>
+                <input type="url" id="profLinkedIn" class="input-control" />
+              </div>
+              <div class="form-group">
+                <label>GitHub URL</label>
+                <input type="url" id="profGitHub" class="input-control" />
+              </div>
+            </div>
+
+            <!-- Education -->
+            <div class="form-section-title">Academic Qualifications</div>
+            <div class="form-row grid-3">
+              <div class="form-group">
+                <label>Class 10 Score (%)</label>
+                <input type="number" step="0.1" id="profClass10" class="input-control" />
+              </div>
+              <div class="form-group">
+                <label>Class 12 Score (%)</label>
+                <input type="number" step="0.1" id="profClass12" class="input-control" />
+              </div>
+              <div class="form-group">
+                <label>College Marks (%)</label>
+                <input type="number" step="0.1" id="profCollegeMarks" class="input-control" />
+              </div>
+            </div>
+            <div class="form-row grid-2">
+              <div class="form-group">
+                <label>Degree & Specialization</label>
+                <input type="text" id="profDegree" class="input-control" />
+              </div>
+              <div class="form-group">
+                <label>College / University</label>
+                <input type="text" id="profCollege" class="input-control" />
+              </div>
+            </div>
+
+            <!-- Preferences -->
+            <div class="form-section-title">Availability & Compensation</div>
+            <div class="form-row grid-2">
+              <div class="form-group">
+                <label>Notice Period</label>
+                <input type="text" id="profNotice" class="input-control" />
+              </div>
+              <div class="form-group">
+                <label>Expected Compensation (LPA)</label>
+                <input type="text" id="profCTC" class="input-control" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Preferred Locations (Priority Order)</label>
+              <textarea id="profLocations" class="input-control textarea-control" rows="2"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Target Roles (Comma-separated)</label>
+              <textarea id="profRoles" class="input-control textarea-control" rows="2"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Key Skills (Comma-separated)</label>
+              <textarea id="profSkills" class="input-control textarea-control" rows="3"></textarea>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnCancelProfile">Cancel</button>
+          <button class="btn btn-primary" id="btnSaveProfile">Save Profile</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast-message"></div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

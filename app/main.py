@@ -57,7 +57,9 @@ async def get_platforms():
 @app.post("/api/platforms/{platform_id}/start")
 async def start_platform(platform_id: str):
     try:
-        await manager.start_platform(platform_id)
+        started = await manager.start_platform(platform_id)
+        if not started:
+            return {"status": "already_running", "message": f"{platform_id} automation is already active"}
         return {"status": "ok", "message": f"{platform_id} automation started"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

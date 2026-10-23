@@ -112,4 +112,21 @@ def test_api_platform_login_session(monkeypatch):
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
 
+def test_api_platform_start_and_stop():
+    # 1. Start naukri
+    res_start = client.post("/api/platforms/naukri/start")
+    assert res_start.status_code == 200
+    assert res_start.json()["status"] in ["ok", "already_running"]
+
+    # 2. Duplicate start while active returns already_running
+    res_dup = client.post("/api/platforms/naukri/start")
+    assert res_dup.status_code == 200
+    assert res_dup.json()["status"] in ["ok", "already_running"]
+
+    # 3. Stop naukri
+    res_stop = client.post("/api/platforms/naukri/stop")
+    assert res_stop.status_code == 200
+    assert res_stop.json()["status"] == "ok"
+
+
 

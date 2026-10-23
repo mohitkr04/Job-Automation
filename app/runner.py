@@ -26,11 +26,11 @@ class PlatformManager:
             cls._instance = PlatformManager()
         return cls._instance
 
-    async def start_platform(self, platform_id: str):
+    async def start_platform(self, platform_id: str) -> bool:
         if platform_id not in self.runners:
             raise ValueError(f"Unknown platform: {platform_id}")
         runner = self.runners[platform_id]
-        await runner.start()
+        return await runner.start()
 
     async def stop_platform(self, platform_id: str):
         if platform_id not in self.runners:

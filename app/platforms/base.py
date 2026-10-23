@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone
 
 from app.database import (
@@ -11,7 +11,12 @@ from app.database import (
     cleanup_outdated_data
 )
 from app.matcher import evaluate_job_match, normalize_job_url
-from app.config import BROWSER_PROFILES_DIR, REQUEST_TIMEOUT_SECONDS
+from app.config import (
+    BROWSER_PROFILES_DIR,
+    REQUEST_TIMEOUT_SECONDS,
+    MAX_DISCOVERED_JOBS_PER_RUN,
+    BATCH_SIZE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +33,11 @@ class BasePlatformRunner(ABC):
     def is_stopped(self) -> bool:
         return self.stop_event.is_set()
 
-    async def start(self):
+    async def start(self) -> bool:
         """Starts the platform workflow independently in the background."""
         if self.is_running:
             logger.info(f"{self.display_name} is already running.")
-            return
+            return False
 
         self.stop_event.clear()
         self.is_running = True
@@ -44,6 +49,7 @@ class BasePlatformRunner(ABC):
         )
 
         self._current_task = asyncio.create_task(self._safe_run())
+        return True
 
     async def stop(self):
         """Signals graceful stop without corrupting state or in-flight records."""
@@ -85,7 +91,13 @@ class BasePlatformRunner(ABC):
             )
         finally:
             self.is_running = False
-            if not self.stop_event.is_set():
+            if self.stop_event.is_set():
+                update_platform_metric(
+                    self.platform_id,
+                    automation_status="Idle",
+                    current_step_details="Platform stopped."
+                )
+            else:
                 update_platform_metric(
                     self.platform_id,
                     automation_status="Completed",
@@ -98,18 +110,18 @@ class BasePlatformRunner(ABC):
         pass
 
     @abstractmethod
-    async def discover_jobs(self) -> List[Dict[str, Any]]:
-        """Discovers jobs for target roles and locations."""
+    async def discover_jobs(self, batch_index: int = 0) -> List[Dict[str, Any]]:
+        """Discovers a batch of jobs for target roles and locations. Returns empty list when exhausted."""
         pass
 
     async def run_workflow(self):
         """Unified reliable workflow:
-        Cleanup -> Search -> Extract -> Normalize -> Match -> Filter -> Deduplicate -> Validate -> Fill Form -> Submit -> Verify -> Save Result
+        Cleanup -> Continuous Multi-Batch Search -> Extract -> Normalize -> Match -> Filter -> Deduplicate -> Validate -> Fill Form -> Submit -> Verify -> Save Result
         """
-        # Step 0: Automatic Data Cleanup (Requirement 4 & 5)
+        # Step 0: Automatic Data Cleanup
         cleanup_stats = cleanup_outdated_data()
-        if cleanup_stats.get("deleted_manual_records", 0) > 0:
-            logger.info(f"Cleaned up {cleanup_stats['deleted_manual_records']} outdated manual-action records.")
+        if cleanup_stats.get("deleted_manual_records", 0) > 0 or cleanup_stats.get("deleted_outdated_posting", 0) > 0:
+            logger.info(f"Cleaned up outdated records: {cleanup_stats}")
 
         # Step 1: Check connection state
         update_platform_metric(self.platform_id, automation_status="Searching", current_step_details="Checking platform status...")
@@ -119,22 +131,38 @@ class BasePlatformRunner(ABC):
         if self.is_stopped():
             return
 
-        # Step 2: Search & Extract jobs
-        update_platform_metric(self.platform_id, automation_status="Searching", current_step_details="Scanning listings for target roles...")
-        discovered_jobs = await self.discover_jobs()
-        update_platform_metric(self.platform_id, jobs_discovered_inc=len(discovered_jobs))
+        # Step 2: Continuous Search & Process Loop across batches
+        total_discovered = 0
+        batch_index = 0
+        max_batches = max(1, MAX_DISCOVERED_JOBS_PER_RUN // max(1, BATCH_SIZE))
 
-        if self.is_stopped() or not discovered_jobs:
-            return
-
-        # Step 3: Process each job
-        for job in discovered_jobs:
-            if self.is_stopped():
-                logger.info(f"{self.display_name} received stop signal; aborting loop.")
+        while not self.is_stopped() and total_discovered < MAX_DISCOVERED_JOBS_PER_RUN and batch_index < max_batches:
+            update_platform_metric(
+                self.platform_id,
+                automation_status="Searching",
+                current_step_details=f"Scanning listings for target roles (batch {batch_index + 1})..."
+            )
+            jobs_batch = await self.discover_jobs(batch_index=batch_index)
+            if not jobs_batch:
+                logger.info(f"{self.display_name}: No further listings discovered for batch {batch_index + 1}. Ending discovery.")
                 break
 
-            await self._process_single_job(job)
-            await asyncio.sleep(1.0) # respectful pace
+            update_platform_metric(self.platform_id, jobs_discovered_inc=len(jobs_batch))
+            total_discovered += len(jobs_batch)
+
+            # Process each job in this batch
+            for job in jobs_batch:
+                if self.is_stopped():
+                    logger.info(f"{self.display_name} received stop signal; aborting loop.")
+                    break
+
+                await self._process_single_job(job)
+                await asyncio.sleep(0.5) # respectful pace
+
+            batch_index += 1
+            if self.is_stopped():
+                break
+            await asyncio.sleep(1.0) # brief rest between discovery batches
 
     async def _process_single_job(self, job: Dict[str, Any]):
         title = job.get("title", "Untitled Role")
@@ -154,7 +182,7 @@ class BasePlatformRunner(ABC):
             current_step_details="Checking duplicates and matching against resume..."
         )
 
-        # 1. Deduplication check (Requirement 2 & 5)
+        # 1. Deduplication check
         if is_job_applied_or_recorded(self.platform_id, job_id, job_url):
             logger.info(f"Skipping duplicate: {title} ({job_url})")
             update_platform_metric(
@@ -162,10 +190,9 @@ class BasePlatformRunner(ABC):
                 duplicates_skipped_inc=1,
                 current_step_details=f"Skipping duplicate: {title[:30]}"
             )
-            # Do NOT store duplicate skip rows in DB (Requirement 2)
             return
 
-        # 2. Match evaluation against resume & posting date filter (Requirements 1 & 2)
+        # 2. Match evaluation against resume & posting date filter (<= 4 days)
         posted_date = job.get("posted_date")
         is_eligible, match_score, match_details = evaluate_job_match(
             title=title,
@@ -178,7 +205,6 @@ class BasePlatformRunner(ABC):
         if not is_eligible:
             reason = match_details.get("rejection_reason", "Criteria threshold not met")
             logger.info(f"Job not eligible/outdated ({match_score}%): {title} — {reason}")
-            # Do NOT store ineligible, outdated, or unverified jobs in DB (Requirement 2)
             update_platform_metric(
                 self.platform_id,
                 current_step_details=f"Skipping: {reason[:45]}"
@@ -211,7 +237,7 @@ class BasePlatformRunner(ABC):
         elif app_outcome == "Failed":
             update_platform_metric(self.platform_id, failed_applications_inc=1)
 
-        # Record application ledger entry
+        # Record application ledger entry with posted_date and posting_age_days
         record_application(
             platform=self.platform_id,
             job_id=job_id,
@@ -227,7 +253,9 @@ class BasePlatformRunner(ABC):
             application_timestamp=datetime.now(timezone.utc).isoformat() if "Applied" in app_outcome else None,
             verification_result=verif_msg,
             failure_reason=fail_reason,
-            job_description=description
+            job_description=description,
+            posted_date=posted_date,
+            posting_age_days=match_details.get("posting_age_days")
         )
 
     @abstractmethod

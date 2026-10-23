@@ -34,6 +34,8 @@ TARGET_MAX_EXPERIENCE_YEARS = float(os.getenv("TARGET_MAX_EXPERIENCE_YEARS", "2.
 # Posting Date Filter & Retention Policies
 MAX_POSTING_AGE_DAYS = int(os.getenv("MAX_POSTING_AGE_DAYS", "4"))
 CLEANUP_RETENTION_DAYS = int(os.getenv("CLEANUP_RETENTION_DAYS", "6"))
+MAX_DISCOVERED_JOBS_PER_RUN = int(os.getenv("MAX_DISCOVERED_JOBS_PER_RUN", "50"))
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))
 
 # Optional Local Portal Credentials (loaded only from local .env, NEVER committed)
 PORTAL_EMAIL = os.getenv("PORTAL_EMAIL", "")

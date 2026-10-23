@@ -217,3 +217,91 @@ def test_phase_h_storage_and_export():
     parsed = json.loads(json_data)
     assert isinstance(parsed, list)
 
+@pytest.mark.asyncio
+async def test_multi_batch_discovery_removes_four_job_limit():
+    """Verify that platforms support multi-batch discovery exceeding the 4-job limit."""
+    naukri_runner = manager.runners["naukri"]
+    batch_0 = await naukri_runner.discover_jobs(batch_index=0)
+    batch_1 = await naukri_runner.discover_jobs(batch_index=1)
+    
+    assert len(batch_0) >= 5, f"Batch 0 returned only {len(batch_0)} jobs"
+    assert len(batch_1) >= 4, f"Batch 1 returned only {len(batch_1)} jobs"
+    total_discovered = len(batch_0) + len(batch_1)
+    assert total_discovered > 4, "Failed to remove 4-job limit"
+    
+    # Verify IDs are distinct across batches
+    ids_0 = {j["job_id"] for j in batch_0}
+    ids_1 = {j["job_id"] for j in batch_1}
+    assert ids_0.isdisjoint(ids_1), "Batches must contain distinct job IDs"
+
+@pytest.mark.asyncio
+async def test_stop_button_graceful_interruption():
+    """Verify Start and Stop controls operate cleanly without hanging or state corruption."""
+    runner = manager.runners["indeed"]
+    started = await runner.start()
+    assert started is True
+    assert runner.is_running is True
+
+    # Stop runner
+    await runner.stop()
+    assert runner.is_running is False
+    assert runner.is_stopped() is True
+
+@pytest.mark.asyncio
+async def test_prevent_duplicate_concurrent_runs():
+    """Verify that multiple Start requests do not spawn duplicate background runs."""
+    runner = manager.runners["hirist"]
+    started_first = await runner.start()
+    assert started_first is True
+
+    # Second start while running must return False
+    started_second = await runner.start()
+    assert started_second is False
+
+    await runner.stop()
+
+def test_record_application_stores_posted_date_and_revalidation():
+    """Verify record_application persists posted_date and get_applications revalidates."""
+    app_id = record_application(
+        platform="naukri",
+        job_id="test_date_validation_job",
+        job_title="Risk Data Analyst",
+        employer_name="Fintech Corp",
+        job_url="https://www.naukri.com/job-listings-date-val-123",
+        job_category="Analytics",
+        job_location="Delhi NCR",
+        experience_req="1-2 Yrs",
+        match_score=85.0,
+        status="Manual Action Required",
+        posted_date="2 days ago",
+        posting_age_days=2.0
+    )
+
+    # Must appear in active applications
+    active_apps = get_applications(platform="naukri", status="Manual Action Required")
+    matching = [a for a in active_apps if a["id"] == app_id]
+    assert len(matching) == 1
+    assert matching[0]["posted_date"] == "2 days ago"
+    assert matching[0]["posting_age_days"] == 2.0
+
+    # Insert an outdated manual record (15 days ago)
+    old_app_id = record_application(
+        platform="naukri",
+        job_id="test_old_job_15d",
+        job_title="Legacy Analyst",
+        employer_name="Old Corp",
+        job_url="https://www.naukri.com/job-listings-old-15d",
+        job_category="Analytics",
+        job_location="Delhi NCR",
+        experience_req="1-2 Yrs",
+        match_score=80.0,
+        status="Manual Action Required",
+        posted_date="15 days ago",
+        posting_age_days=15.0
+    )
+
+    # get_applications MUST filter out the 15-day-old job
+    revalidated = get_applications(platform="naukri", status="Manual Action Required")
+    assert not any(a["id"] == old_app_id for a in revalidated), "Outdated job (>4 days) must be excluded from active queue"
+
+

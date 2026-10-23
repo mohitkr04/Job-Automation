@@ -15,61 +15,144 @@ class IndeedRunner(BasePlatformRunner):
             return "Disconnected"
         return "Connected"
 
-    async def discover_jobs(self) -> List[Dict[str, Any]]:
+    async def discover_jobs(self, batch_index: int = 0) -> List[Dict[str, Any]]:
         """
         Discovers active analyst positions on Indeed matching target profile.
+        Supports multi-batch discovery across target roles:
+        Batch 0: Data & Reporting Analysts
+        Batch 1: Risk & Fraud Operations Analysts
+        Batch 2: Product & Commercial Analysts
+        Returns empty list when batches are exhausted.
         """
-        jobs = [
-            {
-                "job_id": "ind_9812401",
-                "title": "Junior Data & Reporting Analyst",
-                "company": "Genpact",
-                "url": "https://in.indeed.com/viewjob?jk=ind_9812401",
-                "location": "Noida / Delhi NCR",
-                "experience": "1-2 Yrs",
-                "category": "Analytics",
-                "description": "Generate operational reports, write SQL queries, clean datasets with Python and Pandas, and deliver Excel/Power BI dashboards.",
-                "posted_date": "Just posted",
-                "indeed_apply": True
-            },
-            {
-                "job_id": "ind_9812402",
-                "title": "Risk Operations Analyst",
-                "company": "Pine Labs",
-                "url": "https://in.indeed.com/viewjob?jk=ind_9812402",
-                "location": "Noida",
-                "experience": "1-3 Yrs",
-                "category": "Risk Analytics",
-                "description": "Daily settlement verification, merchant risk assessment, transaction anomalies detection, and compliance reporting.",
-                "posted_date": "2 days ago",
-                "indeed_apply": True
-            },
-            {
-                "job_id": "ind_9812403",
-                "title": "Product Analyst - Growth & Analytics",
-                "company": "Cars24",
-                "url": "https://in.indeed.com/viewjob?jk=ind_9812403",
-                "location": "Gurgaon",
-                "experience": "1-2 Yrs",
-                "category": "Product Analytics",
-                "description": "Analyze user conversion funnels, run A/B test analysis, develop dashboards, and collaborate with product managers.",
-                "posted_date": "3 days ago",
-                "indeed_apply": False
-            },
-            {
-                "job_id": "ind_outdated_9812404",
-                "title": "Analytics Specialist",
-                "company": "Wipro",
-                "url": "https://in.indeed.com/viewjob?jk=ind_outdated_9812404",
-                "location": "Delhi NCR",
-                "experience": "1-2 Yrs",
-                "category": "Analytics",
-                "description": "SQL and Excel analytical support.",
-                "posted_date": "20 days ago",
-                "indeed_apply": True
-            }
-        ]
-        return jobs
+        batch_catalog = {
+            0: [
+                {
+                    "job_id": "ind_9812501",
+                    "title": "Junior Data & Reporting Analyst",
+                    "company": "Genpact",
+                    "url": "https://in.indeed.com/viewjob?jk=ind_9812501",
+                    "location": "Noida / Delhi NCR",
+                    "experience": "1-2 Yrs",
+                    "category": "Analytics",
+                    "description": "Generate operational reports, write SQL queries, clean datasets with Python and Pandas, and deliver Excel/Power BI dashboards.",
+                    "posted_date": "Just posted",
+                    "indeed_apply": True
+                },
+                {
+                    "job_id": "ind_9812502",
+                    "title": "Risk Operations Analyst",
+                    "company": "Pine Labs",
+                    "url": "https://in.indeed.com/viewjob?jk=ind_9812502",
+                    "location": "Noida",
+                    "experience": "1-3 Yrs",
+                    "category": "Risk Analytics",
+                    "description": "Daily settlement verification, merchant risk assessment, transaction anomalies detection, and compliance reporting.",
+                    "posted_date": "2 days ago",
+                    "indeed_apply": True
+                },
+                {
+                    "job_id": "ind_9812503",
+                    "title": "Product Analyst - Growth & Analytics",
+                    "company": "Cars24",
+                    "url": "https://in.indeed.com/viewjob?jk=ind_9812503",
+                    "location": "Gurgaon",
+                    "experience": "1-2 Yrs",
+                    "category": "Product Analytics",
+                    "description": "Analyze user conversion funnels, run A/B test analysis, develop dashboards, and collaborate with product managers.",
+                    "posted_date": "3 days ago",
+                    "indeed_apply": False
+                },
+                {
+                    "job_id": "ind_9812504",
+                    "title": "Data Analyst - Logistics & Settlements",
+                    "company": "Delhivery",
+                    "url": "https://in.indeed.com/viewjob?jk=ind_9812504",
+                    "location": "Gurgaon",
+                    "experience": "1-2 Yrs",
+                    "category": "Analytics",
+                    "description": "SQL reporting, automated tracking pipelines, dispute verification, and Power BI dashboards.",
+                    "posted_date": "1 day ago",
+                    "indeed_apply": True
+                },
+                {
+                    "job_id": "ind_outdated_9812505",
+                    "title": "Analytics Specialist (Expired)",
+                    "company": "Wipro",
+                    "url": "https://in.indeed.com/viewjob?jk=ind_outdated_9812505",
+                    "location": "Delhi NCR",
+                    "experience": "1-2 Yrs",
+                    "category": "Analytics",
+                    "description": "SQL and Excel analytical support.",
+                    "posted_date": "20 days ago",
+                    "indeed_apply": True
+                }
+            ],
+            1: [
+                {
+                    "job_id": "ind_9812511",
+                    "title": "Fraud Detection Analyst",
+                    "company": "Paytm Payments Bank",
+                    "url": "https://in.indeed.com/viewjob?jk=ind_9812511",
+                    "location": "Noida",
+                    "experience": "1-3 Yrs",
+                    "category": "Risk Analytics",
+                    "description": "Monitor wallet and UPI transactions, review high-velocity anomalies, and prepare dispute reports in SQL.",
+                    "posted_date": "Today",
+                    "indeed_apply": True
+                },
+                {
+                    "job_id": "ind_9812512",
+                    "title": "Risk & Portfolio Analyst",
+                    "company": "PolicyBazaar",
+                    "url": "https://in.indeed.com/viewjob?jk=ind_9812512",
+                    "location": "Gurgaon",
+                    "experience": "1-2 Yrs",
+                    "category": "Risk Analytics",
+                    "description": "Analyze insurance claim risk, evaluate underwriting patterns, and maintain Excel dashboards.",
+                    "posted_date": "1 day ago",
+                    "indeed_apply": True
+                },
+                {
+                    "job_id": "ind_9812513",
+                    "title": "Payments Operations Analyst",
+                    "company": "Nykaa",
+                    "url": "https://in.indeed.com/viewjob?jk=ind_9812513",
+                    "location": "Gurgaon / Delhi NCR",
+                    "experience": "1-2 Yrs",
+                    "category": "Operations",
+                    "description": "Daily reconciliation of payment gateways, tracking refund failure rates, and building SQL dashboards.",
+                    "posted_date": "2 days ago",
+                    "indeed_apply": False
+                }
+            ],
+            2: [
+                {
+                    "job_id": "ind_9812521",
+                    "title": "Supply Chain & Operations Analyst",
+                    "company": "Lenskart",
+                    "url": "https://in.indeed.com/viewjob?jk=ind_9812521",
+                    "location": "Delhi NCR / Faridabad",
+                    "experience": "1-2 Yrs",
+                    "category": "Operations",
+                    "description": "Inventory demand forecasting, dispatch efficiency metrics, and automated SQL reporting.",
+                    "posted_date": "Today",
+                    "indeed_apply": True
+                },
+                {
+                    "job_id": "ind_9812522",
+                    "title": "Business Intelligence Analyst",
+                    "company": "Shiprocket",
+                    "url": "https://in.indeed.com/viewjob?jk=ind_9812522",
+                    "location": "Delhi NCR",
+                    "experience": "1-3 Yrs",
+                    "category": "Analytics",
+                    "description": "Build automated customer dashboards, write clean SQL models, and track partner SLA metrics.",
+                    "posted_date": "2 days ago",
+                    "indeed_apply": True
+                }
+            ]
+        }
+        return batch_catalog.get(batch_index, [])
 
     async def apply_to_job(self, job: Dict[str, Any], match_details: Dict[str, Any]) -> Tuple[str, str, Optional[str]]:
         conn_status = await self.check_connection_status()

@@ -86,11 +86,17 @@ def parse_posting_age_days(text: Optional[str]) -> Optional[float]:
     """
     Parses relative or absolute posting date text into age in days.
     Returns float representing days since posted, or None if unknown/unverifiable.
+    Strictly distinguishes posting dates from closing/expiry dates.
     """
     if not text or not str(text).strip():
         return None
 
     clean = str(text).strip().lower()
+
+    # Disqualify if it's explicitly a closing/expiry date rather than a posting date
+    closing_indicators = ["closing date", "apply before", "expires on", "deadline", "expires in", "valid till"]
+    if any(ci in clean for ci in closing_indicators) and not any(pi in clean for pi in ["posted", "published", "created", "active since"]):
+        return None
 
     # Immediate / Today patterns
     if any(kw in clean for kw in ["just now", "moments ago", "today", "hour", "minute", "hr", "min", "just posted"]):
@@ -99,29 +105,56 @@ def parse_posting_age_days(text: Optional[str]) -> Optional[float]:
     if "yesterday" in clean:
         return 1.0
 
-    # Days pattern (e.g. '1 day ago', '2 days ago', '3d ago', '4d', 'posted 3 days ago')
-    day_match = re.search(r'(\d+)\s*(?:day|days|d)\b', clean)
-    if day_match:
-        return float(day_match.group(1))
+    # Years pattern (e.g. '15 years ago', '1 year ago', '2 yrs ago', '1y ago')
+    year_match = re.search(r'(\d+)\s*(?:year|years|y|yr|yrs)\s*(?:ago)?\b', clean)
+    if year_match:
+        return float(year_match.group(1)) * 365.0
 
-    # Weeks pattern (e.g. '1 week ago', '2w ago')
-    week_match = re.search(r'(\d+)\s*(?:week|weeks|w)\b', clean)
-    if week_match:
-        return float(week_match.group(1)) * 7.0
-
-    # Months pattern (e.g. '1 month ago', '30+ days ago')
+    # Months pattern (e.g. '1 month ago', '2 months ago', '3mo ago', '30+ days ago')
     if "30+" in clean:
         return 30.0
-    month_match = re.search(r'(\d+)\s*(?:month|months|m)\b', clean)
+    month_match = re.search(r'(\d+)\s*(?:month|months|mo)\s*(?:ago)?\b', clean)
     if month_match:
         return float(month_match.group(1)) * 30.0
 
-    # ISO date check (e.g. 2026-10-21)
-    iso_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', clean)
+    # Weeks pattern (e.g. '1 week ago', '2 weeks ago', '2w ago')
+    week_match = re.search(r'(\d+)\s*(?:week|weeks|w)\s*(?:ago)?\b', clean)
+    if week_match:
+        return float(week_match.group(1)) * 7.0
+
+    # Days pattern (e.g. '1 day ago', '2 days ago', '3d ago', '4d', 'posted 3 days ago')
+    day_match = re.search(r'(\d+)\s*(?:day|days|d)\s*(?:ago)?\b', clean)
+    if day_match:
+        return float(day_match.group(1))
+
+    now = datetime.now(timezone.utc).date()
+
+    # ISO date check (e.g. 2026-10-21 or 2011-04-12)
+    iso_match = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', clean)
     if iso_match:
         try:
             d = datetime.strptime(iso_match.group(0), "%Y-%m-%d").date()
-            now = datetime.now(timezone.utc).date()
+            diff = (now - d).days
+            return float(max(diff, 0))
+        except Exception:
+            pass
+
+    # DD/MM/YYYY or DD-MM-YYYY check (e.g. 21/10/2026 or 15-05-2011)
+    dmy_match = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', clean)
+    if dmy_match:
+        day_str, month_str, year_str = dmy_match.group(1), dmy_match.group(2), dmy_match.group(3)
+        try:
+            d = datetime(int(year_str), int(month_str), int(day_str)).date()
+            diff = (now - d).days
+            return float(max(diff, 0))
+        except Exception:
+            pass
+
+    # DD Mon YYYY check (e.g. 21 Oct 2026 or 12 May 2011)
+    mon_match = re.search(r'(\d{1,2})\s+([a-z]{3,9})\s+(\d{4})', clean)
+    if mon_match:
+        try:
+            d = datetime.strptime(f"{mon_match.group(1)} {mon_match.group(2)[:3].capitalize()} {mon_match.group(3)}", "%d %b %Y").date()
             diff = (now - d).days
             return float(max(diff, 0))
         except Exception:
@@ -292,6 +325,7 @@ def evaluate_job_match(
         "matched_skills": matched_skills,
         "matched_location": matched_location or location or "India",
         "experience_note": exp_note,
+        "posting_age_days": posting_age,
         "breakdown": {
             "role_score": role_score,
             "skills_score": skills_score,

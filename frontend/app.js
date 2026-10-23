@@ -87,6 +87,23 @@ function updatePlatformCards(metrics) {
         timeEl.textContent = "Never";
       }
     }
+    // Button states
+    const cardEl = document.getElementById(`card-${p}`);
+    if (cardEl) {
+      const startBtn = cardEl.querySelector(".btn-start");
+      const stopBtn = cardEl.querySelector(".btn-stop");
+      const isRunning = data.is_active || (data.automation_status !== "Idle" && data.automation_status !== "Completed" && data.automation_status !== "Failed" && data.automation_status !== "Paused");
+      if (startBtn) {
+        startBtn.disabled = isRunning;
+        startBtn.style.opacity = isRunning ? "0.55" : "1";
+        startBtn.style.cursor = isRunning ? "not-allowed" : "pointer";
+      }
+      if (stopBtn) {
+        stopBtn.disabled = !isRunning;
+        stopBtn.style.opacity = !isRunning ? "0.55" : "1";
+        stopBtn.style.cursor = !isRunning ? "not-allowed" : "pointer";
+      }
+    }
   });
 }
 
@@ -115,9 +132,12 @@ async function startPlatform(platformId) {
     const res = await fetch(`/api/platforms/${platformId}/start`, { method: "POST" });
     const data = await res.json();
     if (res.ok) {
-      showToast(`${platformId} started.`);
-      // Refresh applications table after a few moments
-      setTimeout(loadApplications, 2000);
+      if (data.status === "already_running") {
+        showToast(`${platformId} is already running.`);
+      } else {
+        showToast(`${platformId} started.`);
+      }
+      setTimeout(loadApplications, 1500);
     } else {
       showToast(`Error: ${data.detail || "Could not start"}`);
     }

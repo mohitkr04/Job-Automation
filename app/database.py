@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Any
-from app.config import DB_PATH, LOGS_DIR, CLEANUP_RETENTION_DAYS
+from app.config import DB_PATH, LOGS_DIR, CLEANUP_RETENTION_DAYS, MAX_POSTING_AGE_DAYS
 
 def get_db_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -36,10 +36,20 @@ def init_db():
         verification_result TEXT,
         failure_reason TEXT,
         job_description TEXT,
+        posted_date TEXT,
+        posting_age_days REAL,
         created_at TEXT NOT NULL,
         UNIQUE(platform, job_id)
     )
     """)
+
+    # Migration check for existing databases
+    cursor.execute("PRAGMA table_info(applications)")
+    existing_cols = {col["name"] for col in cursor.fetchall()}
+    if "posted_date" not in existing_cols:
+        cursor.execute("ALTER TABLE applications ADD COLUMN posted_date TEXT")
+    if "posting_age_days" not in existing_cols:
+        cursor.execute("ALTER TABLE applications ADD COLUMN posting_age_days REAL")
 
     # Indexes for fast lookup, deduplication, and cleanup optimization
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_apps_url ON applications(job_url)")
@@ -99,11 +109,20 @@ def record_application(
     verification_result: Optional[str] = None,
     failure_reason: Optional[str] = None,
     job_description: Optional[str] = None,
+    posted_date: Optional[str] = None,
+    posting_age_days: Optional[float] = None
 ) -> str:
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    app_id = str(uuid.uuid4())
+    # Check if this job already has a record to preserve the existing primary key
+    if job_id:
+        cursor.execute("SELECT id FROM applications WHERE platform = ? AND job_id = ?", (platform, job_id))
+        existing_row = cursor.fetchone()
+        app_id = existing_row["id"] if existing_row else str(uuid.uuid4())
+    else:
+        app_id = str(uuid.uuid4())
+
     now = datetime.now(timezone.utc).isoformat()
     disc_time = discovery_timestamp or now
 
@@ -116,18 +135,20 @@ def record_application(
             id, platform, job_id, job_title, employer_name, job_url, job_category,
             job_location, experience_req, match_score, discovery_timestamp,
             application_timestamp, status, verification_result, failure_reason,
-            job_description, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            job_description, posted_date, posting_age_days, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(platform, job_id) DO UPDATE SET
             status=excluded.status,
             verification_result=excluded.verification_result,
             failure_reason=excluded.failure_reason,
-            application_timestamp=excluded.application_timestamp
+            application_timestamp=excluded.application_timestamp,
+            posted_date=excluded.posted_date,
+            posting_age_days=excluded.posting_age_days
         """, (
             app_id, platform, job_id or app_id, job_title, employer_name, job_url,
             job_category, job_location, experience_req, round(match_score, 1),
             disc_time, application_timestamp, status, verification_result,
-            failure_reason, desc_to_store, now
+            failure_reason, desc_to_store, posted_date, posting_age_days, now
         ))
         conn.commit()
     finally:
@@ -201,7 +222,8 @@ def delete_application(app_id: str) -> bool:
 def get_applications(
     platform: Optional[str] = None,
     status: Optional[str] = None,
-    limit: int = 100
+    limit: int = 200,
+    max_posting_age: int = MAX_POSTING_AGE_DAYS
 ) -> List[Dict[str, Any]]:
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -216,6 +238,15 @@ def get_applications(
         conditions.append("status = ?")
         params.append(status)
         
+    # Revalidate: exclude any manual action items whose posting age exceeds maximum allowed days
+    conditions.append("(status != 'Manual Action Required' OR posting_age_days IS NULL OR posting_age_days <= ?)")
+    params.append(float(max_posting_age))
+
+    # Also exclude manual action items older than 6 days retention
+    cutoff_retention_iso = (datetime.now(timezone.utc) - timedelta(days=CLEANUP_RETENTION_DAYS)).isoformat()
+    conditions.append("(status != 'Manual Action Required' OR created_at >= ?)")
+    params.append(cutoff_retention_iso)
+
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
         
@@ -225,7 +256,21 @@ def get_applications(
     cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+
+    # Double-layered revalidation: strictly exclude outdated manual action jobs
+    from app.matcher import parse_posting_age_days
+    valid_apps = []
+    for r in rows:
+        app_dict = dict(r)
+        if app_dict.get("status") == "Manual Action Required":
+            age = app_dict.get("posting_age_days")
+            if age is None and app_dict.get("posted_date"):
+                age = parse_posting_age_days(app_dict.get("posted_date"))
+            if age is not None and age > max_posting_age:
+                continue
+        valid_apps.append(app_dict)
+
+    return valid_apps
 
 def get_all_platform_metrics() -> Dict[str, Dict[str, Any]]:
     conn = get_db_connection()
@@ -323,13 +368,19 @@ def export_applications_json() -> str:
     apps = get_applications(limit=5000)
     return json.dumps(apps, indent=2)
 
-def cleanup_outdated_data(retention_days: int = CLEANUP_RETENTION_DAYS) -> Dict[str, Any]:
+def cleanup_outdated_data(
+    retention_days: int = CLEANUP_RETENTION_DAYS,
+    max_posting_age: int = MAX_POSTING_AGE_DAYS
+) -> Dict[str, Any]:
     """
     Automatically deletes temporary job records, outdated manual-action records,
-    and unnecessary application data older than retention_days (default 6 days).
-
-    CRITICAL (Requirement 5): Preserves 'Applied — Verified' and 'Submission Unconfirmed'
-    records to maintain essential application history and duplicate prevention.
+    and unnecessary application data.
+    - Purges manual action records older than retention cutoff (default 6 days).
+    - Purges manual action records with posting age > max_posting_age (default 4 days).
+    - Purges transient failed records older than retention cutoff.
+    - Purges duplicate records in manual action queue keeping only the most recent.
+    - Purges legacy 'Skipped' records.
+    - CRITICAL: Preserves 'Applied — Verified' and 'Submission Unconfirmed' records.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -337,7 +388,7 @@ def cleanup_outdated_data(retention_days: int = CLEANUP_RETENTION_DAYS) -> Dict[
     cutoff_dt = datetime.now(timezone.utc) - timedelta(days=retention_days)
     cutoff_iso = cutoff_dt.isoformat()
 
-    # 1. Delete outdated manual action records older than retention cutoff (5-6 days)
+    # 1. Delete outdated manual action records older than retention cutoff (6 days)
     cursor.execute("""
         DELETE FROM applications
         WHERE status = 'Manual Action Required'
@@ -345,7 +396,29 @@ def cleanup_outdated_data(retention_days: int = CLEANUP_RETENTION_DAYS) -> Dict[
     """, (cutoff_iso,))
     deleted_manual = cursor.rowcount
 
-    # 2. Delete any transient failure records older than retention cutoff
+    # 2. Delete manual action records with posting age > max_posting_age (4 days)
+    cursor.execute("""
+        DELETE FROM applications
+        WHERE status = 'Manual Action Required'
+          AND posting_age_days IS NOT NULL
+          AND posting_age_days > ?
+    """, (float(max_posting_age),))
+    deleted_outdated_posting = cursor.rowcount
+
+    # 3. Deduplicate manual action queue: keep only newest record if duplicate url or job_id
+    cursor.execute("""
+        DELETE FROM applications
+        WHERE status = 'Manual Action Required'
+          AND id NOT IN (
+              SELECT id FROM applications
+              WHERE status = 'Manual Action Required'
+              GROUP BY platform, COALESCE(job_id, job_url)
+              HAVING created_at = MAX(created_at)
+          )
+    """)
+    deleted_duplicates = cursor.rowcount
+
+    # 4. Delete any transient failure records older than retention cutoff
     cursor.execute("""
         DELETE FROM applications
         WHERE status = 'Failed'
@@ -353,7 +426,7 @@ def cleanup_outdated_data(retention_days: int = CLEANUP_RETENTION_DAYS) -> Dict[
     """, (cutoff_iso,))
     deleted_failed = cursor.rowcount
 
-    # 3. Purge any legacy 'Skipped' records (Requirement 2)
+    # 5. Purge any legacy 'Skipped' records
     cursor.execute("""
         DELETE FROM applications
         WHERE status LIKE 'Skipped%'
@@ -362,14 +435,14 @@ def cleanup_outdated_data(retention_days: int = CLEANUP_RETENTION_DAYS) -> Dict[
 
     conn.commit()
 
-    # 4. Vacuum SQLite database to reclaim disk space
+    # 6. Vacuum SQLite database to reclaim disk space
     try:
         cursor.execute("VACUUM")
     except Exception:
         pass
     conn.close()
 
-    # 5. Clean up outdated log files in LOGS_DIR
+    # 7. Clean up outdated log files in LOGS_DIR
     cleaned_logs = 0
     logs_path = Path(LOGS_DIR)
     if logs_path.exists():
@@ -384,9 +457,12 @@ def cleanup_outdated_data(retention_days: int = CLEANUP_RETENTION_DAYS) -> Dict[
 
     return {
         "deleted_manual_records": deleted_manual,
+        "deleted_outdated_posting": deleted_outdated_posting,
+        "deleted_duplicates": deleted_duplicates,
         "deleted_failed_records": deleted_failed,
         "purged_legacy_skips": deleted_skips,
         "cleaned_log_files": cleaned_logs,
         "cutoff_timestamp": cutoff_iso,
-        "retention_days": retention_days
+        "retention_days": retention_days,
+        "max_posting_age": max_posting_age
     }

@@ -152,6 +152,52 @@ def is_job_applied_or_recorded(platform: str, job_id: Optional[str], normalized_
     finally:
         conn.close()
 
+def get_application_by_id(app_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM applications WHERE id = ?", (app_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def update_application_status(
+    app_id: str,
+    new_status: str,
+    verification_result: Optional[str] = None
+) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        cursor.execute("""
+        UPDATE applications SET
+            status = ?,
+            verification_result = ?,
+            application_timestamp = ?
+        WHERE id = ?
+        """, (
+            new_status,
+            verification_result or f"Status updated to {new_status} by candidate",
+            now if "Applied" in new_status else None,
+            app_id
+        ))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+def delete_application(app_id: str) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM applications WHERE id = ?", (app_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
 def get_applications(
     platform: Optional[str] = None,
     status: Optional[str] = None,

@@ -105,7 +105,10 @@
               </button>
               <button class="btn btn-outline btn-stop" onclick="stopPlatform('naukri')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"></rect></svg>
-                Stop Naukri
+                Stop
+              </button>
+              <button class="btn btn-icon" title="Open Naukri Persistent Browser Session" onclick="loginPlatform('naukri')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
               </button>
               <button class="btn btn-icon" title="Test Connection" onclick="testConnection('naukri')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
@@ -165,7 +168,10 @@
               </button>
               <button class="btn btn-outline btn-stop" onclick="stopPlatform('linkedin')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"></rect></svg>
-                Stop LinkedIn
+                Stop
+              </button>
+              <button class="btn btn-icon" title="Open LinkedIn Persistent Browser Session" onclick="loginPlatform('linkedin')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
               </button>
               <button class="btn btn-icon" title="Test Connection" onclick="testConnection('linkedin')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
@@ -225,7 +231,10 @@
               </button>
               <button class="btn btn-outline btn-stop" onclick="stopPlatform('indeed')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"></rect></svg>
-                Stop Indeed
+                Stop
+              </button>
+              <button class="btn btn-icon" title="Open Indeed Persistent Browser Session" onclick="loginPlatform('indeed')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
               </button>
               <button class="btn btn-icon" title="Test Connection" onclick="testConnection('indeed')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
@@ -285,7 +294,10 @@
               </button>
               <button class="btn btn-outline btn-stop" onclick="stopPlatform('hirist')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"></rect></svg>
-                Stop Hirist
+                Stop
+              </button>
+              <button class="btn btn-icon" title="Open Hirist Persistent Browser Session" onclick="loginPlatform('hirist')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
               </button>
               <button class="btn btn-icon" title="Test Connection" onclick="testConnection('hirist')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
@@ -350,12 +362,13 @@
                 <th>Match Score</th>
                 <th>Location / Exp</th>
                 <th>Verification Note</th>
+                <th>Manual Action</th>
                 <th>Discovered</th>
               </tr>
             </thead>
             <tbody id="appsTableBody">
               <tr>
-                <td colspan="7" class="text-center py-8 text-muted">No applications recorded yet. Start a platform to begin discovery.</td>
+                <td colspan="8" class="text-center py-8 text-muted">No records match the active filter.</td>
               </tr>
             </tbody>
           </table>

@@ -577,6 +577,63 @@ body {
   color: #a5b4fc;
 }
 
+/* Micro Action Buttons in Ledger Table */
+.action-btn-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-micro {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.btn-open {
+  background: rgba(99, 102, 241, 0.12);
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.3);
+}
+.btn-open:hover {
+  background: rgba(99, 102, 241, 0.25);
+  color: #fff;
+  border-color: #818cf8;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.25);
+}
+
+.btn-verify {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.btn-verify:hover {
+  background: rgba(16, 185, 129, 0.25);
+  color: #fff;
+  border-color: #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+}
+
+.btn-dismiss {
+  background: rgba(244, 63, 94, 0.08);
+  color: #fb7185;
+  border-color: rgba(244, 63, 94, 0.2);
+  padding: 4px 6px;
+}
+.btn-dismiss:hover {
+  background: rgba(244, 63, 94, 0.2);
+  color: #fff;
+  border-color: #f43f5e;
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;

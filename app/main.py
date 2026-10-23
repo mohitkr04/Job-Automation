@@ -15,10 +15,14 @@ from app.database import (
     get_applications,
     export_applications_csv,
     export_applications_json,
-    cleanup_outdated_data
+    cleanup_outdated_data,
+    update_application_status,
+    delete_application,
+    get_application_by_id
 )
 from app.matcher import get_profile, update_profile, get_resume_text
 from app.runner import manager
+from app.browser_assistant import launch_headed_browser
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,6 +77,51 @@ async def test_platform_connection(platform_id: str):
         return {"platform": platform_id, "connection_status": status}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/platforms/{platform_id}/login")
+async def login_platform(platform_id: str):
+    try:
+        res = launch_headed_browser(platform_id)
+        return {"status": "ok", "message": f"Launched login session for {platform_id}", "details": res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/applications/{app_id}/open")
+async def open_application_in_browser(app_id: str):
+    app_data = get_application_by_id(app_id)
+    if not app_data:
+        raise HTTPException(status_code=404, detail="Application record not found")
+    
+    url = app_data.get("job_url")
+    platform = app_data.get("platform", "naukri")
+    if not url:
+        raise HTTPException(status_code=400, detail="Application has no job URL")
+
+    res = launch_headed_browser(platform, target_url=url)
+    return {"status": "ok", "message": f"Opened {app_data.get('job_title')} in {platform} browser session", "details": res}
+
+@app.post("/api/applications/{app_id}/verify")
+async def mark_application_verified(app_id: str):
+    app_data = get_application_by_id(app_id)
+    if not app_data:
+        raise HTTPException(status_code=404, detail="Application record not found")
+    
+    success = update_application_status(
+        app_id,
+        "Applied — Verified",
+        "Manually completed and verified by candidate in browser session"
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update application status")
+    
+    return {"status": "ok", "message": "Marked application as Applied & Verified"}
+
+@app.delete("/api/applications/{app_id}")
+async def remove_application(app_id: str):
+    success = delete_application(app_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Application not found or already deleted")
+    return {"status": "ok", "message": "Application dismissed from manual queue"}
 
 @app.get("/api/applications")
 async def list_applications(platform: Optional[str] = None, status: Optional[str] = None, limit: int = 200):

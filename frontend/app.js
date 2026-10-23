@@ -151,6 +151,66 @@ async function testConnection(platformId) {
   }
 }
 
+async function loginPlatform(platformId) {
+  showToast(`Launching ${platformId} headed browser session...`);
+  try {
+    const res = await fetch(`/api/platforms/${platformId}/login`, { method: "POST" });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(`Launched ${platformId} browser profile. Complete login/CAPTCHA in window.`);
+    } else {
+      showToast(`Error: ${data.detail || "Could not launch browser"}`);
+    }
+  } catch (e) {
+    showToast(`Network error: ${e.message}`);
+  }
+}
+
+async function openApplicationInBrowser(appId) {
+  showToast("Opening job in persistent browser session...");
+  try {
+    const res = await fetch(`/api/applications/${appId}/open`, { method: "POST" });
+    const data = await res.json();
+    if (res.ok) {
+      showToast("Opened job page in browser. Complete application form.");
+    } else {
+      showToast(`Error: ${data.detail || "Could not open"}`);
+    }
+  } catch (e) {
+    showToast(`Network error: ${e.message}`);
+  }
+}
+
+async function markApplicationVerified(appId) {
+  showToast("Updating application status to Applied & Verified...");
+  try {
+    const res = await fetch(`/api/applications/${appId}/verify`, { method: "POST" });
+    const data = await res.json();
+    if (res.ok) {
+      showToast("Application marked as Applied & Verified!");
+      await loadApplications();
+    } else {
+      showToast(`Error: ${data.detail || "Update failed"}`);
+    }
+  } catch (e) {
+    showToast(`Network error: ${e.message}`);
+  }
+}
+
+async function dismissApplication(appId) {
+  try {
+    const res = await fetch(`/api/applications/${appId}`, { method: "DELETE" });
+    if (res.ok) {
+      showToast("Application dismissed from manual queue.");
+      await loadApplications();
+    } else {
+      showToast("Failed to dismiss application.");
+    }
+  } catch (e) {
+    showToast(`Network error: ${e.message}`);
+  }
+}
+
 // 4. Applications Ledger & Manual Section
 function setQuickFilter(status) {
   document.getElementById("filterStatus").value = status;
@@ -219,7 +279,7 @@ function renderApplicationsTable(apps) {
   if (!tbody) return;
 
   if (!apps || apps.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-muted">No records match the active filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-muted">No records match the active filter.</td></tr>`;
     return;
   }
 
@@ -228,6 +288,27 @@ function renderApplicationsTable(apps) {
     const scoreColor = app.match_score >= 80 ? "color: #34d399;" : (app.match_score >= 60 ? "color: #a5b4fc;" : "color: #94a3b8;");
     const dateStr = app.created_at ? new Date(app.created_at).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
     const jobLink = app.job_url ? `<a href="${app.job_url}" target="_blank" style="color: #818cf8; text-decoration: none; font-weight: 600;">${escapeHtml(app.job_title)}</a>` : escapeHtml(app.job_title);
+
+    let actionCell = `<span style="color: var(--text-dim); font-size: 0.72rem;">-</span>`;
+    if (app.status === "Manual Action Required") {
+      actionCell = `
+        <div class="action-btn-group">
+          <button class="btn-micro btn-open" title="Open job page in headed browser" onclick="openApplicationInBrowser('${app.id}')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+            Open
+          </button>
+          <button class="btn-micro btn-verify" title="Mark as completed & verified" onclick="markApplicationVerified('${app.id}')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            Mark Applied
+          </button>
+          <button class="btn-micro btn-dismiss" title="Dismiss from manual queue" onclick="dismissApplication('${app.id}')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+      `;
+    } else if (app.status === "Applied — Verified") {
+      actionCell = `<span style="color: var(--emerald); font-size: 0.75rem; font-weight: 600;">✓ Verified</span>`;
+    }
 
     return `
       <tr>
@@ -242,7 +323,8 @@ function renderApplicationsTable(apps) {
           <div>${escapeHtml(app.job_location || "Open")}</div>
           <div style="font-size: 0.72rem; color: #64748b;">${escapeHtml(app.experience_req || "Not specified")}</div>
         </td>
-        <td style="max-width: 260px; font-size: 0.75rem; color: #cbd5e1;">${escapeHtml(app.verification_result || app.failure_reason || "-")}</td>
+        <td style="max-width: 240px; font-size: 0.75rem; color: #cbd5e1;">${escapeHtml(app.verification_result || app.failure_reason || "-")}</td>
+        <td>${actionCell}</td>
         <td style="font-family: var(--font-mono); font-size: 0.72rem; color: #64748b;">${dateStr}</td>
       </tr>
     `;

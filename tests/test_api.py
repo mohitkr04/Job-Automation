@@ -49,3 +49,67 @@ def test_api_maintenance_cleanup():
     assert "cleanup_stats" in data
     assert "retention_days" in data["cleanup_stats"]
 
+def test_api_manual_application_workflow(monkeypatch):
+    from app.database import record_application, get_application_by_id
+
+    # Mock launch_headed_browser to prevent popping real browser window during testing
+    import app.main as main_mod
+    monkeypatch.setattr(main_mod, "launch_headed_browser", lambda platform, target_url=None: {
+        "status": "ok",
+        "mocked": True,
+        "platform": platform,
+        "url": target_url
+    })
+
+    # 1. Create a mock manual action application
+    test_app_id = record_application(
+        platform="naukri",
+        job_id="test_manual_job_999",
+        job_title="Data Analyst - Manual Test",
+        employer_name="Fintech Corp",
+        job_url="https://www.naukri.com/job-listings-manual-test-999",
+        job_category="Data Analyst",
+        job_location="Gurgaon",
+        experience_req="1-2 Yrs",
+        match_score=88.5,
+        status="Manual Action Required",
+        verification_result=None,
+        failure_reason="Screening test requires manual completion"
+    )
+
+    assert test_app_id is not None
+
+    # 2. Test opening the manual application
+    res_open = client.post(f"/api/applications/{test_app_id}/open")
+    assert res_open.status_code == 200
+    assert res_open.json()["status"] == "ok"
+
+    # 3. Test marking manual application as verified
+    res_verify = client.post(f"/api/applications/{test_app_id}/verify")
+    assert res_verify.status_code == 200
+    assert res_verify.json()["status"] == "ok"
+
+    updated = get_application_by_id(test_app_id)
+    assert updated["status"] == "Applied — Verified"
+    assert "manually completed" in updated["verification_result"].lower()
+
+    # 4. Test dismissing/deleting the application
+    res_delete = client.delete(f"/api/applications/{test_app_id}")
+    assert res_delete.status_code == 200
+    assert res_delete.json()["status"] == "ok"
+
+    assert get_application_by_id(test_app_id) is None
+
+def test_api_platform_login_session(monkeypatch):
+    import app.main as main_mod
+    monkeypatch.setattr(main_mod, "launch_headed_browser", lambda platform, target_url=None: {
+        "status": "ok",
+        "mocked": True,
+        "platform": platform
+    })
+
+    res = client.post("/api/platforms/naukri/login")
+    assert res.status_code == 200
+    assert res.json()["status"] == "ok"
+
+

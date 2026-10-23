@@ -2,6 +2,7 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Tuple
+from pathlib import Path
 from datetime import datetime, timezone
 
 from app.database import (
@@ -10,12 +11,13 @@ from app.database import (
     is_job_applied_or_recorded,
     cleanup_outdated_data
 )
-from app.matcher import evaluate_job_match, normalize_job_url
+from app.matcher import evaluate_job_match, normalize_job_url, get_profile, get_resume_text
 from app.config import (
     BROWSER_PROFILES_DIR,
     REQUEST_TIMEOUT_SECONDS,
     MAX_DISCOVERED_JOBS_PER_RUN,
-    BATCH_SIZE
+    BATCH_SIZE,
+    RESUME_PATH
 )
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,37 @@ class BasePlatformRunner(ABC):
         self._current_task: Optional[asyncio.Task] = None
         self.profile_dir = BROWSER_PROFILES_DIR / platform_id
         self.profile_dir.mkdir(exist_ok=True)
+
+    def prepare_applicant_data(self) -> Dict[str, Any]:
+        """Loads, parses, and validates candidate profile and resume file for auto-apply form filling."""
+        profile = get_profile()
+        resume_file = Path(RESUME_PATH)
+        has_resume = resume_file.exists() and resume_file.stat().st_size > 0
+        resume_text = get_resume_text() if has_resume else ""
+
+        personal = profile.get("personal", {})
+        education = profile.get("education", {})
+        preferences = profile.get("preferences", {})
+
+        return {
+            "full_name": personal.get("full_name", "Mohit Kumar"),
+            "email": personal.get("email", ""),
+            "phone": personal.get("phone", ""),
+            "current_location": personal.get("current_location", "Delhi"),
+            "linkedin_url": personal.get("linkedin_url", ""),
+            "github_url": personal.get("github_url", ""),
+            "notice_period": preferences.get("notice_period_text", "15 days"),
+            "expected_ctc": preferences.get("expected_ctc_lpa", "9-10 LPA"),
+            "degree": education.get("degree", "B.Tech"),
+            "college": education.get("college_name", ""),
+            "college_marks": education.get("college_percentage", 82.0),
+            "resume_path": str(resume_file) if has_resume else None,
+            "resume_filename": resume_file.name if has_resume else None,
+            "resume_size_bytes": resume_file.stat().st_size if has_resume else 0,
+            "resume_verified": has_resume and len(resume_text) > 200,
+            "experience_years": profile.get("experience", {}).get("total_years", 1.8),
+            "skills": profile.get("skills", [])
+        }
 
     def is_stopped(self) -> bool:
         return self.stop_event.is_set()

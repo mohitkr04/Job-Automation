@@ -1,6 +1,7 @@
 import pytest
 import os
 import json
+import asyncio
 from pathlib import Path
 
 from app.database import (
@@ -303,5 +304,51 @@ def test_record_application_stores_posted_date_and_revalidation():
     # get_applications MUST filter out the 15-day-old job
     revalidated = get_applications(platform="naukri", status="Manual Action Required")
     assert not any(a["id"] == old_app_id for a in revalidated), "Outdated job (>4 days) must be excluded from active queue"
+
+@pytest.mark.asyncio
+async def test_auto_apply_form_filling_and_resume_attachment(monkeypatch):
+    """Verify applicant details and resume attachment during auto-apply execution."""
+    runner = manager.runners["naukri"]
+    
+    # 1. Verify candidate profile details extracted for application form
+    applicant = runner.prepare_applicant_data()
+    assert applicant["full_name"] == "Mohit Kumar"
+    assert applicant["email"] == "mohitkrgupta.13.05@gmail.com"
+    assert applicant["phone"] == "6299329495"
+    assert applicant["current_location"] == "Delhi"
+    assert "15 days" in applicant["notice_period"]
+    assert applicant["expected_ctc"] == "9-10 LPA"
+    assert applicant["experience_years"] == 1.8
+    assert applicant["resume_verified"] is True
+    assert applicant["resume_size_bytes"] > 1000
+    assert applicant["resume_filename"] == "resume.pdf"
+
+    # 2. Test auto-apply submission in authenticated session
+    monkeypatch.setattr(runner, "check_connection_status", lambda: asyncio.sleep(0, result="Connected"))
+
+    mock_job = {
+        "job_id": "test_direct_apply_job",
+        "title": "Junior Data Analyst",
+        "company": "Test Analytics Ltd",
+        "url": "https://www.naukri.com/job-listings-test-direct",
+        "apply_type": "direct",
+        "posted_date": "Today"
+    }
+    mock_match = {"eligible": True, "total_score": 88.0, "posting_age_days": 0.1}
+
+    outcome, verif_msg, fail_reason = await runner.apply_to_job(mock_job, mock_match)
+    assert outcome == "Applied — Verified"
+    assert fail_reason is None
+    assert "Mohit Kumar" in verif_msg
+    assert "mohitkrgupta.13.05@gmail.com" in verif_msg
+    assert "6299329495" in verif_msg
+    assert "resume.pdf" in verif_msg
+
+    # 3. Test failure safety when resume is missing
+    monkeypatch.setattr("app.platforms.base.RESUME_PATH", "non_existent_resume.pdf")
+    fail_outcome, fail_msg, fail_r = await runner.apply_to_job(mock_job, mock_match)
+    assert fail_outcome == "Failed"
+    assert fail_r == "Missing Resume"
+
 
 

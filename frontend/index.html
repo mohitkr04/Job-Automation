@@ -295,14 +295,23 @@
         </div>
       </section>
 
-      <!-- Section: Application History Ledger -->
+      <!-- Section: Application History & Manual Application Section -->
       <section class="section-ledger">
         <div class="section-title-row">
           <div>
-            <h2 class="section-title">Application Ledger & Verification</h2>
-            <p class="section-desc">Minimal persistent records with verified outcomes and duplicate prevention.</p>
+            <h2 class="section-title">Application Ledger & Manual Action Center</h2>
+            <p class="section-desc">Retains only eligible applications and active manual-action items. Auto-cleans expired records after 6 days.</p>
           </div>
           <div class="ledger-actions">
+            <!-- Dedicated Section Tabs (Requirement 3) -->
+            <div class="tab-pills">
+              <button class="tab-pill active" id="tabAll" onclick="setQuickFilter('')">All Active</button>
+              <button class="tab-pill" id="tabManual" onclick="setQuickFilter('Manual Action Required')">
+                Manual Action Needed <span class="counter-badge" id="manualCountBadge">0</span>
+              </button>
+              <button class="tab-pill" id="tabVerified" onclick="setQuickFilter('Applied — Verified')">Applied & Verified</button>
+            </div>
+
             <select id="filterPlatform" class="select-control" onchange="loadApplications()">
               <option value="">All Platforms</option>
               <option value="naukri">Naukri</option>
@@ -314,10 +323,13 @@
               <option value="">All Statuses</option>
               <option value="Applied — Verified">Applied — Verified</option>
               <option value="Manual Action Required">Manual Action Required</option>
-              <option value="Skipped — Duplicate">Skipped — Duplicate</option>
-              <option value="Skipped — Ineligible">Skipped — Ineligible</option>
+              <option value="Submission Unconfirmed">Submission Unconfirmed</option>
               <option value="Failed">Failed</option>
             </select>
+            <button class="btn btn-secondary" onclick="triggerManualCleanup()" title="Auto-clean outdated temporary records (6 days retention)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              Auto-Clean (6d)
+            </button>
             <button class="btn btn-secondary" onclick="exportData('csv')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
               Export CSV

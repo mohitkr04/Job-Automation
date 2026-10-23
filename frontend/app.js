@@ -151,7 +151,42 @@ async function testConnection(platformId) {
   }
 }
 
-// 4. Applications Ledger
+// 4. Applications Ledger & Manual Section
+function setQuickFilter(status) {
+  document.getElementById("filterStatus").value = status;
+  
+  // Update active pill state
+  document.querySelectorAll(".tab-pill").forEach(el => el.classList.remove("active"));
+  if (status === "Manual Action Required") {
+    document.getElementById("tabManual").classList.add("active");
+  } else if (status === "Applied — Verified") {
+    document.getElementById("tabVerified").classList.add("active");
+  } else {
+    document.getElementById("tabAll").classList.add("active");
+  }
+
+  loadApplications();
+}
+
+async function triggerManualCleanup() {
+  showToast("Running automatic data cleanup (6 days cutoff)...");
+  try {
+    const res = await fetch("/api/maintenance/cleanup", { method: "POST" });
+    const data = await res.json();
+    if (res.ok) {
+      const stats = data.cleanup_stats || {};
+      const delManual = stats.deleted_manual_records || 0;
+      const purgedSkips = stats.purged_legacy_skips || 0;
+      showToast(`Cleaned: ${delManual} outdated manual, ${purgedSkips} residual skips.`);
+      await loadApplications();
+    } else {
+      showToast(`Cleanup error: ${data.detail || "Failed"}`);
+    }
+  } catch (e) {
+    showToast(`Network error: ${e.message}`);
+  }
+}
+
 async function loadApplications() {
   const platform = document.getElementById("filterPlatform").value;
   const status = document.getElementById("filterStatus").value;
@@ -164,8 +199,18 @@ async function loadApplications() {
     const res = await fetch(url);
     const data = await res.json();
     renderApplicationsTable(data);
+    updateManualBadgeCount(data);
   } catch (e) {
     console.error("Failed to load applications", e);
+  }
+}
+
+function updateManualBadgeCount(apps) {
+  if (!apps) return;
+  const manualCount = apps.filter(a => a.status === "Manual Action Required").length;
+  const badgeEl = document.getElementById("manualCountBadge");
+  if (badgeEl) {
+    badgeEl.textContent = manualCount;
   }
 }
 
@@ -174,7 +219,7 @@ function renderApplicationsTable(apps) {
   if (!tbody) return;
 
   if (!apps || apps.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-muted">No applications recorded yet. Start a platform to begin discovery.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-muted">No records match the active filter.</td></tr>`;
     return;
   }
 

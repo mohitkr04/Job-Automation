@@ -57,6 +57,7 @@ class LinkedInRunner(BasePlatformRunner):
                 "experience": "1-2 Yrs",
                 "category": "Analytics",
                 "description": "Building and maintaining SQL pipelines, Python data transformation, statistical reporting, and KPI monitoring.",
+                "posted_date": "1 day ago",
                 "easy_apply": True
             },
             {
@@ -68,6 +69,7 @@ class LinkedInRunner(BasePlatformRunner):
                 "experience": "1-3 Yrs",
                 "category": "Risk Analytics",
                 "description": "Transaction monitoring, fraud pattern analysis, payout validation, and regulatory compliance reporting using Python, SQL, and Excel.",
+                "posted_date": "2 days ago",
                 "easy_apply": True
             },
             {
@@ -79,7 +81,20 @@ class LinkedInRunner(BasePlatformRunner):
                 "experience": "1-2 Yrs",
                 "category": "Analytics",
                 "description": "Develop Power BI dashboards, automated reports, customer analytics, and ad-hoc data analysis using SQL and Python.",
+                "posted_date": "Today",
                 "easy_apply": False
+            },
+            {
+                "job_id": "li_outdated_4029115",
+                "title": "Operations Data Analyst",
+                "company": "Infosys",
+                "url": "https://www.linkedin.com/jobs/view/operations-analyst-at-infosys-4029115",
+                "location": "Noida",
+                "experience": "1-2 Yrs",
+                "category": "Analytics",
+                "description": "SQL reporting and dashboard development.",
+                "posted_date": "15 days ago",
+                "easy_apply": True
             }
         ]
         jobs.extend(curated_jobs)

@@ -30,3 +30,12 @@ MAX_DELAY_SECONDS = float(os.getenv("MAX_DELAY_SECONDS", "4.5"))
 MIN_MATCH_SCORE = float(os.getenv("MIN_MATCH_SCORE", "60.0"))
 TARGET_MIN_EXPERIENCE_YEARS = float(os.getenv("TARGET_MIN_EXPERIENCE_YEARS", "0.0"))
 TARGET_MAX_EXPERIENCE_YEARS = float(os.getenv("TARGET_MAX_EXPERIENCE_YEARS", "2.5"))
+
+# Posting Date Filter & Retention Policies
+MAX_POSTING_AGE_DAYS = int(os.getenv("MAX_POSTING_AGE_DAYS", "4"))
+CLEANUP_RETENTION_DAYS = int(os.getenv("CLEANUP_RETENTION_DAYS", "6"))
+
+# Optional Local Portal Credentials (loaded only from local .env, NEVER committed)
+PORTAL_EMAIL = os.getenv("PORTAL_EMAIL", "")
+PORTAL_PASSWORD = os.getenv("PORTAL_PASSWORD", "")
+

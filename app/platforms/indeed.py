@@ -29,6 +29,7 @@ class IndeedRunner(BasePlatformRunner):
                 "experience": "1-2 Yrs",
                 "category": "Analytics",
                 "description": "Generate operational reports, write SQL queries, clean datasets with Python and Pandas, and deliver Excel/Power BI dashboards.",
+                "posted_date": "Just posted",
                 "indeed_apply": True
             },
             {
@@ -40,6 +41,7 @@ class IndeedRunner(BasePlatformRunner):
                 "experience": "1-3 Yrs",
                 "category": "Risk Analytics",
                 "description": "Daily settlement verification, merchant risk assessment, transaction anomalies detection, and compliance reporting.",
+                "posted_date": "2 days ago",
                 "indeed_apply": True
             },
             {
@@ -51,7 +53,20 @@ class IndeedRunner(BasePlatformRunner):
                 "experience": "1-2 Yrs",
                 "category": "Product Analytics",
                 "description": "Analyze user conversion funnels, run A/B test analysis, develop dashboards, and collaborate with product managers.",
+                "posted_date": "3 days ago",
                 "indeed_apply": False
+            },
+            {
+                "job_id": "ind_outdated_9812404",
+                "title": "Analytics Specialist",
+                "company": "Wipro",
+                "url": "https://in.indeed.com/viewjob?jk=ind_outdated_9812404",
+                "location": "Delhi NCR",
+                "experience": "1-2 Yrs",
+                "category": "Analytics",
+                "description": "SQL and Excel analytical support.",
+                "posted_date": "20 days ago",
+                "indeed_apply": True
             }
         ]
         return jobs

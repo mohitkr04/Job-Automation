@@ -29,6 +29,7 @@ class HiristRunner(BasePlatformRunner):
                 "experience": "1-3 Yrs",
                 "category": "Fintech Analytics",
                 "description": "SQL data extraction, portfolio risk monitoring, automated reconciliation, and executive dashboards in Power BI and Excel.",
+                "posted_date": "1 day ago",
                 "direct_apply": True
             },
             {
@@ -40,6 +41,7 @@ class HiristRunner(BasePlatformRunner):
                 "experience": "1-2 Yrs",
                 "category": "Risk Analytics",
                 "description": "Identify fraudulent activity, build transaction monitoring rules, investigate creator/user accounts, and generate compliance reports.",
+                "posted_date": "Today",
                 "direct_apply": True
             },
             {
@@ -51,6 +53,19 @@ class HiristRunner(BasePlatformRunner):
                 "experience": "1-2 Yrs",
                 "category": "Operations",
                 "description": "Streamline partner operations, review regulatory audits, and automate data verification pipelines using Python.",
+                "posted_date": "2 days ago",
+                "direct_apply": True
+            },
+            {
+                "job_id": "hirist_outdated_85204",
+                "title": "Senior Risk Strategist",
+                "company": "PayU",
+                "url": "https://www.hirist.tech/j/payu-senior-risk-strategist-85204.html",
+                "location": "Gurgaon",
+                "experience": "1-2 Yrs",
+                "category": "Risk Analytics",
+                "description": "Risk and settlements reporting.",
+                "posted_date": "25 days ago",
                 "direct_apply": True
             }
         ]

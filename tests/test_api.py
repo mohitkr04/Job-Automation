@@ -40,3 +40,12 @@ def test_api_export_json():
     res = client.get("/api/applications/export?format=json")
     assert res.status_code == 200
     assert "application/json" in res.headers.get("content-type", "")
+
+def test_api_maintenance_cleanup():
+    res = client.post("/api/maintenance/cleanup")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert "cleanup_stats" in data
+    assert "retention_days" in data["cleanup_stats"]
+

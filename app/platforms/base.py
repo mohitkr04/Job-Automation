@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from app.database import (
     update_platform_metric,
     record_application,
-    is_job_applied_or_recorded
+    is_job_applied_or_recorded,
+    cleanup_outdated_data
 )
 from app.matcher import evaluate_job_match, normalize_job_url
 from app.config import BROWSER_PROFILES_DIR, REQUEST_TIMEOUT_SECONDS
@@ -103,8 +104,13 @@ class BasePlatformRunner(ABC):
 
     async def run_workflow(self):
         """Unified reliable workflow:
-        Search -> Extract -> Normalize -> Match -> Filter -> Deduplicate -> Validate -> Fill Form -> Submit -> Verify -> Save Result
+        Cleanup -> Search -> Extract -> Normalize -> Match -> Filter -> Deduplicate -> Validate -> Fill Form -> Submit -> Verify -> Save Result
         """
+        # Step 0: Automatic Data Cleanup (Requirement 4 & 5)
+        cleanup_stats = cleanup_outdated_data()
+        if cleanup_stats.get("deleted_manual_records", 0) > 0:
+            logger.info(f"Cleaned up {cleanup_stats['deleted_manual_records']} outdated manual-action records.")
+
         # Step 1: Check connection state
         update_platform_metric(self.platform_id, automation_status="Searching", current_step_details="Checking platform status...")
         conn_status = await self.check_connection_status()
@@ -148,49 +154,34 @@ class BasePlatformRunner(ABC):
             current_step_details="Checking duplicates and matching against resume..."
         )
 
-        # 1. Deduplication check
+        # 1. Deduplication check (Requirement 2 & 5)
         if is_job_applied_or_recorded(self.platform_id, job_id, job_url):
             logger.info(f"Skipping duplicate: {title} ({job_url})")
-            update_platform_metric(self.platform_id, duplicates_skipped_inc=1)
-            record_application(
-                platform=self.platform_id,
-                job_id=job_id,
-                job_title=title,
-                employer_name=company,
-                job_url=job_url,
-                job_category=category,
-                job_location=location,
-                experience_req=exp_req,
-                match_score=0.0,
-                status="Skipped — Duplicate",
-                discovery_timestamp=disc_time,
-                verification_result="Skipped to prevent duplicate application"
+            update_platform_metric(
+                self.platform_id,
+                duplicates_skipped_inc=1,
+                current_step_details=f"Skipping duplicate: {title[:30]}"
             )
+            # Do NOT store duplicate skip rows in DB (Requirement 2)
             return
 
-        # 2. Match evaluation against resume
+        # 2. Match evaluation against resume & posting date filter (Requirements 1 & 2)
+        posted_date = job.get("posted_date")
         is_eligible, match_score, match_details = evaluate_job_match(
             title=title,
             description=description,
             location=location,
-            experience_text=exp_req
+            experience_text=exp_req,
+            posted_date_text=posted_date
         )
 
         if not is_eligible:
-            logger.info(f"Job not eligible ({match_score}%): {title}")
-            record_application(
-                platform=self.platform_id,
-                job_id=job_id,
-                job_title=title,
-                employer_name=company,
-                job_url=job_url,
-                job_category=category,
-                job_location=location,
-                experience_req=exp_req,
-                match_score=match_score,
-                status="Skipped — Ineligible",
-                discovery_timestamp=disc_time,
-                verification_result=match_details.get("rejection_reason", "Criteria threshold not met")
+            reason = match_details.get("rejection_reason", "Criteria threshold not met")
+            logger.info(f"Job not eligible/outdated ({match_score}%): {title} — {reason}")
+            # Do NOT store ineligible, outdated, or unverified jobs in DB (Requirement 2)
+            update_platform_metric(
+                self.platform_id,
+                current_step_details=f"Skipping: {reason[:45]}"
             )
             return
 

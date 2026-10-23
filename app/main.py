@@ -14,7 +14,8 @@ from app.database import (
     init_db,
     get_applications,
     export_applications_csv,
-    export_applications_json
+    export_applications_json,
+    cleanup_outdated_data
 )
 from app.matcher import get_profile, update_profile, get_resume_text
 from app.runner import manager
@@ -30,7 +31,8 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    logger.info("Local database initialized.")
+    cleaned = cleanup_outdated_data()
+    logger.info(f"Local database initialized and cleaned: {cleaned}")
     yield
 
 app = FastAPI(title="Local-First Job Application Automation", version="1.0.0", lifespan=lifespan)
@@ -98,6 +100,13 @@ async def get_user_profile():
 async def save_user_profile(payload: Dict[str, Any]):
     update_profile(payload)
     return {"status": "ok", "message": "Profile updated successfully"}
+
+@app.post("/api/maintenance/cleanup")
+async def trigger_cleanup(retention_days: Optional[int] = None):
+    if retention_days is not None and retention_days < 1:
+        raise HTTPException(status_code=400, detail="retention_days must be at least 1")
+    stats = cleanup_outdated_data(retention_days) if retention_days else cleanup_outdated_data()
+    return {"status": "ok", "cleanup_stats": stats}
 
 @app.get("/api/resume/info")
 async def get_resume_info():

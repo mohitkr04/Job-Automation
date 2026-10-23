@@ -59,6 +59,8 @@ class NaukriRunner(BasePlatformRunner):
                             exp = item.get("experienceStr", "1-2 Yrs")
                             loc = ", ".join([p.get("label", "") for p in item.get("placeholders", []) if p.get("type") == "location"]) or "Delhi / NCR"
 
+                            posted_label = item.get("footerPlaceholderLabel") or item.get("createdDate") or "1 day ago"
+
                             jobs.append({
                                 "job_id": f"naukri_{job_id}",
                                 "title": title,
@@ -68,6 +70,7 @@ class NaukriRunner(BasePlatformRunner):
                                 "experience": exp,
                                 "category": "Analytics",
                                 "description": desc,
+                                "posted_date": posted_label,
                                 "apply_type": "direct" if item.get("applyUrl") is None else "external"
                             })
                     else:
@@ -86,6 +89,7 @@ class NaukriRunner(BasePlatformRunner):
                             "experience": "1-3 Yrs",
                             "category": "Analytics",
                             "description": "Responsible for data cleaning, Python, SQL queries, dashboard creation in Power BI, and reporting.",
+                            "posted_date": "1 day ago",
                             "apply_type": "direct"
                         },
                         {
@@ -97,6 +101,7 @@ class NaukriRunner(BasePlatformRunner):
                             "experience": "1-2 Yrs",
                             "category": "Risk Analytics",
                             "description": "Monitor transactions, investigate payment disputes, analyze self-transactions, and ensure compliance using SQL and Excel.",
+                            "posted_date": "2 days ago",
                             "apply_type": "direct"
                         },
                         {
@@ -108,7 +113,20 @@ class NaukriRunner(BasePlatformRunner):
                             "experience": "1-2 Yrs",
                             "category": "Analytics",
                             "description": "Work with operations team to streamline settlement reconciliation, payout tracking, and analytical reporting.",
+                            "posted_date": "Today",
                             "apply_type": "external"
+                        },
+                        {
+                            "job_id": "naukri_outdated_104",
+                            "title": "Risk Analytics Associate",
+                            "company": "American Express",
+                            "url": "https://www.naukri.com/job-listings-risk-associate-amex-gurgaon-104",
+                            "location": "Gurgaon",
+                            "experience": "1-2 Yrs",
+                            "category": "Risk Analytics",
+                            "description": "Review fraud chargebacks and compliance data using SQL.",
+                            "posted_date": "12 days ago",
+                            "apply_type": "direct"
                         }
                     ]
                     jobs.extend(fallback_jobs)

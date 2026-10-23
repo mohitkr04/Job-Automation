@@ -3,9 +3,10 @@ import json
 import csv
 import io
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import List, Dict, Optional, Any
-from app.config import DB_PATH
+from app.config import DB_PATH, LOGS_DIR, CLEANUP_RETENTION_DAYS
 
 def get_db_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -40,10 +41,14 @@ def init_db():
     )
     """)
 
-    # Indexes for fast lookup and deduplication
+    # Indexes for fast lookup, deduplication, and cleanup optimization
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_apps_url ON applications(job_url)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_apps_platform ON applications(platform)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_apps_status ON applications(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_apps_status_created ON applications(status, created_at)")
+
+    # Purge any legacy 'Skipped' records to satisfy Requirement 2 (No unnecessary storage)
+    cursor.execute("DELETE FROM applications WHERE status LIKE 'Skipped%'")
 
     # 2. Platform Real-time Metrics Table
     cursor.execute("""
@@ -271,3 +276,71 @@ def export_applications_csv() -> str:
 def export_applications_json() -> str:
     apps = get_applications(limit=5000)
     return json.dumps(apps, indent=2)
+
+def cleanup_outdated_data(retention_days: int = CLEANUP_RETENTION_DAYS) -> Dict[str, Any]:
+    """
+    Automatically deletes temporary job records, outdated manual-action records,
+    and unnecessary application data older than retention_days (default 6 days).
+
+    CRITICAL (Requirement 5): Preserves 'Applied — Verified' and 'Submission Unconfirmed'
+    records to maintain essential application history and duplicate prevention.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    cutoff_iso = cutoff_dt.isoformat()
+
+    # 1. Delete outdated manual action records older than retention cutoff (5-6 days)
+    cursor.execute("""
+        DELETE FROM applications
+        WHERE status = 'Manual Action Required'
+          AND created_at < ?
+    """, (cutoff_iso,))
+    deleted_manual = cursor.rowcount
+
+    # 2. Delete any transient failure records older than retention cutoff
+    cursor.execute("""
+        DELETE FROM applications
+        WHERE status = 'Failed'
+          AND created_at < ?
+    """, (cutoff_iso,))
+    deleted_failed = cursor.rowcount
+
+    # 3. Purge any legacy 'Skipped' records (Requirement 2)
+    cursor.execute("""
+        DELETE FROM applications
+        WHERE status LIKE 'Skipped%'
+    """)
+    deleted_skips = cursor.rowcount
+
+    conn.commit()
+
+    # 4. Vacuum SQLite database to reclaim disk space
+    try:
+        cursor.execute("VACUUM")
+    except Exception:
+        pass
+    conn.close()
+
+    # 5. Clean up outdated log files in LOGS_DIR
+    cleaned_logs = 0
+    logs_path = Path(LOGS_DIR)
+    if logs_path.exists():
+        for log_file in logs_path.glob("*.log"):
+            try:
+                mtime = datetime.fromtimestamp(log_file.stat().st_mtime, tz=timezone.utc)
+                if mtime < cutoff_dt:
+                    log_file.unlink()
+                    cleaned_logs += 1
+            except Exception:
+                pass
+
+    return {
+        "deleted_manual_records": deleted_manual,
+        "deleted_failed_records": deleted_failed,
+        "purged_legacy_skips": deleted_skips,
+        "cleaned_log_files": cleaned_logs,
+        "cutoff_timestamp": cutoff_iso,
+        "retention_days": retention_days
+    }

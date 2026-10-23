@@ -3,8 +3,16 @@ import json
 import urllib.parse
 from pathlib import Path
 from typing import Dict, Any, Tuple, List, Optional
+from datetime import datetime, timezone
 import pypdf
-from app.config import RESUME_PATH, PROFILE_PATH, MIN_MATCH_SCORE, TARGET_MIN_EXPERIENCE_YEARS, TARGET_MAX_EXPERIENCE_YEARS
+from app.config import (
+    RESUME_PATH,
+    PROFILE_PATH,
+    MIN_MATCH_SCORE,
+    TARGET_MIN_EXPERIENCE_YEARS,
+    TARGET_MAX_EXPERIENCE_YEARS,
+    MAX_POSTING_AGE_DAYS
+)
 
 _CACHED_RESUME_TEXT: Optional[str] = None
 _CACHED_PROFILE: Optional[Dict[str, Any]] = None
@@ -52,9 +60,7 @@ def normalize_job_url(raw_url: str) -> str:
         return ""
     try:
         parsed = urllib.parse.urlparse(raw_url)
-        # Keep scheme, netloc, and path
         clean_path = parsed.path.rstrip("/")
-        # Filter out tracking parameters
         tracking_params = {
             "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
             "ref", "trackingid", "track", "mid", "sid", "f", "rc", "from", "sp",
@@ -76,12 +82,58 @@ def normalize_job_url(raw_url: str) -> str:
     except Exception:
         return raw_url.strip()
 
+def parse_posting_age_days(text: Optional[str]) -> Optional[float]:
+    """
+    Parses relative or absolute posting date text into age in days.
+    Returns float representing days since posted, or None if unknown/unverifiable.
+    """
+    if not text or not str(text).strip():
+        return None
+
+    clean = str(text).strip().lower()
+
+    # Immediate / Today patterns
+    if any(kw in clean for kw in ["just now", "moments ago", "today", "hour", "minute", "hr", "min", "just posted"]):
+        return 0.1
+
+    if "yesterday" in clean:
+        return 1.0
+
+    # Days pattern (e.g. '1 day ago', '2 days ago', '3d ago', '4d', 'posted 3 days ago')
+    day_match = re.search(r'(\d+)\s*(?:day|days|d)\b', clean)
+    if day_match:
+        return float(day_match.group(1))
+
+    # Weeks pattern (e.g. '1 week ago', '2w ago')
+    week_match = re.search(r'(\d+)\s*(?:week|weeks|w)\b', clean)
+    if week_match:
+        return float(week_match.group(1)) * 7.0
+
+    # Months pattern (e.g. '1 month ago', '30+ days ago')
+    if "30+" in clean:
+        return 30.0
+    month_match = re.search(r'(\d+)\s*(?:month|months|m)\b', clean)
+    if month_match:
+        return float(month_match.group(1)) * 30.0
+
+    # ISO date check (e.g. 2026-10-21)
+    iso_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', clean)
+    if iso_match:
+        try:
+            d = datetime.strptime(iso_match.group(0), "%Y-%m-%d").date()
+            now = datetime.now(timezone.utc).date()
+            diff = (now - d).days
+            return float(max(diff, 0))
+        except Exception:
+            pass
+
+    return None
+
 def parse_experience_years(text: str) -> Tuple[Optional[float], Optional[float]]:
     """Extract minimum and maximum experience required from text (e.g. '1-3 yrs', '2+ years')."""
     if not text:
         return None, None
     
-    # Common patterns: '1 - 3 yrs', '1 to 2 years', '0 - 2 Yrs', '2+ years'
     range_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)\s*(?:yr|year|exp)', text, re.IGNORECASE)
     if range_match:
         return float(range_match.group(1)), float(range_match.group(2))
@@ -102,12 +154,31 @@ def evaluate_job_match(
     title: str,
     description: str,
     location: str = "",
-    experience_text: str = ""
+    experience_text: str = "",
+    posted_date_text: Optional[str] = None
 ) -> Tuple[bool, float, Dict[str, Any]]:
     """
     Evaluates job eligibility and computes transparent match score (0-100).
+    Enforces Job Posting Date Filter (posted within last 3-4 days).
     Returns (is_eligible, match_score, evaluation_details).
     """
+    # 1. Posting Date Filter Check (Requirement 1)
+    posting_age = parse_posting_age_days(posted_date_text)
+    if posting_age is None:
+        return False, 0.0, {
+            "eligible": False,
+            "rejection_reason": f"Posting date is missing or cannot be verified (only jobs posted within last {MAX_POSTING_AGE_DAYS} days are eligible)",
+            "posting_age_days": None,
+            "breakdown": {"role_match": 0, "skills_match": 0, "exp_match": 0, "location_match": 0}
+        }
+
+    if posting_age > MAX_POSTING_AGE_DAYS:
+        return False, 0.0, {
+            "eligible": False,
+            "rejection_reason": f"Job posting is outdated ({posting_age:.1f} days ago, maximum allowed is {MAX_POSTING_AGE_DAYS} days)",
+            "posting_age_days": posting_age,
+            "breakdown": {"role_match": 0, "skills_match": 0, "exp_match": 0, "location_match": 0}
+        }
     profile = get_profile()
     resume_text = get_resume_text()
     

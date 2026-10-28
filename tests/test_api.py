@@ -74,10 +74,12 @@ def test_api_manual_application_workflow(monkeypatch):
         match_score=88.5,
         status="Manual Action Required",
         verification_result=None,
-        failure_reason="Screening test requires manual completion"
+        failure_reason="Screening test requires manual completion",
+        posted_date="Today",
+        posting_age_days=0.1
     )
 
-    assert test_app_id is not None
+    assert test_app_id != ""
 
     # 2. Test opening the manual application
     res_open = client.post(f"/api/applications/{test_app_id}/open")

@@ -3,10 +3,14 @@ import json
 import csv
 import io
 import uuid
+import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from app.config import DB_PATH, LOGS_DIR, CLEANUP_RETENTION_DAYS, MAX_POSTING_AGE_DAYS
+from app.matcher import validate_job_posting_date
+
+logger = logging.getLogger(__name__)
 
 def get_db_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -93,6 +97,9 @@ def init_db():
     conn.commit()
     conn.close()
 
+    # Automatically purge outdated manual records and legacy skips on database initialization
+    cleanup_outdated_data()
+
 def record_application(
     platform: str,
     job_id: Optional[str],
@@ -112,6 +119,22 @@ def record_application(
     posted_date: Optional[str] = None,
     posting_age_days: Optional[float] = None
 ) -> str:
+    # Centralized Posting Date Check:
+    # Any job entering the active manual action queue MUST pass centralized date validation (<= 4 days)
+    if status == "Manual Action Required":
+        is_date_valid, computed_age, date_reason = validate_job_posting_date(posted_date)
+        if not is_date_valid:
+            logger.warning(
+                f"REJECTED entry into Manual Action queue for '{job_title}' ({platform}): {date_reason}"
+            )
+            return ""
+        if posting_age_days is None and computed_age is not None:
+            posting_age_days = computed_age
+    elif status == "Applied — Verified":
+        if posting_age_days is None and posted_date:
+            _, computed_age, _ = validate_job_posting_date(posted_date)
+            posting_age_days = computed_age
+
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -238,8 +261,9 @@ def get_applications(
         conditions.append("status = ?")
         params.append(status)
         
-    # Revalidate: exclude any manual action items whose posting age exceeds maximum allowed days
-    conditions.append("(status != 'Manual Action Required' OR posting_age_days IS NULL OR posting_age_days <= ?)")
+    # Revalidate: strictly exclude any manual action items whose posting age exceeds maximum allowed days
+    # or whose posting age is NULL/unverified
+    conditions.append("(status != 'Manual Action Required' OR (posting_age_days IS NOT NULL AND posting_age_days <= ?))")
     params.append(float(max_posting_age))
 
     # Also exclude manual action items older than 6 days retention
@@ -257,17 +281,17 @@ def get_applications(
     rows = cursor.fetchall()
     conn.close()
 
-    # Double-layered revalidation: strictly exclude outdated manual action jobs
-    from app.matcher import parse_posting_age_days
+    # Double-layered revalidation: strictly exclude outdated or date-unverified manual action jobs
     valid_apps = []
     for r in rows:
         app_dict = dict(r)
         if app_dict.get("status") == "Manual Action Required":
-            age = app_dict.get("posting_age_days")
-            if age is None and app_dict.get("posted_date"):
-                age = parse_posting_age_days(app_dict.get("posted_date"))
-            if age is not None and age > max_posting_age:
+            disc_ts = app_dict.get("discovery_timestamp") or app_dict.get("created_at")
+            is_valid, age_days, _ = validate_job_posting_date(app_dict.get("posted_date"), max_posting_age, discovery_timestamp=disc_ts)
+            if not is_valid:
                 continue
+            if app_dict.get("posting_age_days") is None and age_days is not None:
+                app_dict["posting_age_days"] = age_days
         valid_apps.append(app_dict)
 
     return valid_apps
@@ -376,11 +400,12 @@ def cleanup_outdated_data(
     Automatically deletes temporary job records, outdated manual-action records,
     and unnecessary application data.
     - Purges manual action records older than retention cutoff (default 6 days).
-    - Purges manual action records with posting age > max_posting_age (default 4 days).
+    - Purges manual action records with posting age > max_posting_age (default 4 days)
+      or where posting date is missing/unverifiable.
     - Purges transient failed records older than retention cutoff.
     - Purges duplicate records in manual action queue keeping only the most recent.
     - Purges legacy 'Skipped' records.
-    - CRITICAL: Preserves 'Applied — Verified' and 'Submission Unconfirmed' records.
+    - CRITICAL: Preserves 'Applied — Verified' and 'Submission Unconfirmed' records permanently.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -388,22 +413,49 @@ def cleanup_outdated_data(
     cutoff_dt = datetime.now(timezone.utc) - timedelta(days=retention_days)
     cutoff_iso = cutoff_dt.isoformat()
 
-    # 1. Delete outdated manual action records older than retention cutoff (6 days)
-    cursor.execute("""
-        DELETE FROM applications
-        WHERE status = 'Manual Action Required'
-          AND created_at < ?
-    """, (cutoff_iso,))
-    deleted_manual = cursor.rowcount
+    # 1. Audit all existing 'Manual Action Required' records against centralized date validator
+    cursor.execute("SELECT id, posted_date, posting_age_days, created_at FROM applications WHERE status = 'Manual Action Required'")
+    manual_rows = cursor.fetchall()
+    
+    deleted_outdated_posting = 0
+    deleted_manual = 0
+    ids_to_delete = set()
+    updates_to_make = []
 
-    # 2. Delete manual action records with posting age > max_posting_age (4 days)
+    for row in manual_rows:
+        row_id = row["id"]
+        created_at = row["created_at"]
+        posted_date = row["posted_date"]
+        posting_age_days = row["posting_age_days"]
+
+        # Check retention cutoff (6 days)
+        if created_at < cutoff_iso:
+            ids_to_delete.add(row_id)
+            deleted_manual += 1
+            continue
+
+        # Check centralized posting date validation (4 days)
+        is_valid, age_days, _ = validate_job_posting_date(posted_date, max_posting_age, discovery_timestamp=created_at)
+        if not is_valid:
+            ids_to_delete.add(row_id)
+            deleted_outdated_posting += 1
+        else:
+            if posting_age_days != age_days:
+                updates_to_make.append((age_days, row_id))
+
+    if updates_to_make:
+        cursor.executemany("UPDATE applications SET posting_age_days = ? WHERE id = ?", updates_to_make)
+
+    if ids_to_delete:
+        cursor.executemany("DELETE FROM applications WHERE id = ?", [(i,) for i in ids_to_delete])
+
+    # 2. Secondary cleanup: ensure no residual manual records exceed limits or have NULL posting age
     cursor.execute("""
         DELETE FROM applications
         WHERE status = 'Manual Action Required'
-          AND posting_age_days IS NOT NULL
-          AND posting_age_days > ?
+          AND (posting_age_days IS NULL OR posting_age_days > ?)
     """, (float(max_posting_age),))
-    deleted_outdated_posting = cursor.rowcount
+    deleted_outdated_posting += cursor.rowcount
 
     # 3. Deduplicate manual action queue: keep only newest record if duplicate url or job_id
     cursor.execute("""

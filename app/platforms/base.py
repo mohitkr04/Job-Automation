@@ -11,7 +11,7 @@ from app.database import (
     is_job_applied_or_recorded,
     cleanup_outdated_data
 )
-from app.matcher import evaluate_job_match, normalize_job_url, get_profile, get_resume_text
+from app.matcher import evaluate_job_match, normalize_job_url, get_profile, get_resume_text, validate_job_posting_date
 from app.config import (
     BROWSER_PROFILES_DIR,
     REQUEST_TIMEOUT_SECONDS,
@@ -215,6 +215,17 @@ class BasePlatformRunner(ABC):
             current_step_details="Checking duplicates and matching against resume..."
         )
 
+        # 0. Centralized Job Posting Date Filter (Priority 1)
+        posted_date = job.get("posted_date")
+        is_date_valid, posting_age, date_reason = validate_job_posting_date(posted_date)
+        if not is_date_valid:
+            logger.info(f"Skipping outdated/unverified job ({posted_date}): {title} — {date_reason}")
+            update_platform_metric(
+                self.platform_id,
+                current_step_details=f"Date rejected: {date_reason[:45]}"
+            )
+            return
+
         # 1. Deduplication check
         if is_job_applied_or_recorded(self.platform_id, job_id, job_url):
             logger.info(f"Skipping duplicate: {title} ({job_url})")
@@ -225,8 +236,7 @@ class BasePlatformRunner(ABC):
             )
             return
 
-        # 2. Match evaluation against resume & posting date filter (<= 4 days)
-        posted_date = job.get("posted_date")
+        # 2. Match evaluation against resume & preferences
         is_eligible, match_score, match_details = evaluate_job_match(
             title=title,
             description=description,

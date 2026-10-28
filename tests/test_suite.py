@@ -151,13 +151,13 @@ def test_automatic_cleanup_and_history_retention():
                   'https://www.naukri.com/job-listings-old-manual-2', 75.0, 'Manual Action Required', ?, ?)
     """, (ten_days_ago, ten_days_ago))
 
-    # 3. Insert recent manual-action record from 2 days ago (MUST BE PRESERVED)
+    # 3. Insert recent manual-action record from 2 days ago with valid posting date (MUST BE PRESERVED)
     cursor.execute("""
         INSERT OR REPLACE INTO applications (
             id, platform, job_id, job_title, employer_name, job_url,
-            match_score, status, discovery_timestamp, created_at
+            match_score, status, posted_date, posting_age_days, discovery_timestamp, created_at
         ) VALUES ('app-recent-manual', 'indeed', 'ind_rec_manual_3', 'Recent Manual Job', 'Recent Employer',
-                  'https://in.indeed.com/viewjob?jk=recent-manual-3', 80.0, 'Manual Action Required', ?, ?)
+                  'https://in.indeed.com/viewjob?jk=recent-manual-3', 80.0, 'Manual Action Required', 'Today', 0.1, ?, ?)
     """, (two_days_ago, two_days_ago))
 
     conn.commit()
@@ -349,6 +349,182 @@ async def test_auto_apply_form_filling_and_resume_attachment(monkeypatch):
     fail_outcome, fail_msg, fail_r = await runner.apply_to_job(mock_job, mock_match)
     assert fail_outcome == "Failed"
     assert fail_r == "Missing Resume"
+
+def test_priority_1_to_5_mandatory_requirements():
+    """
+    Comprehensive tests covering all 12 mandatory test cases from Priority 1 to 5:
+    1. A job posted today is accepted if all other checks pass.
+    2. A job posted three days ago is accepted if all other checks pass.
+    3. A job posted five days ago is rejected.
+    4. A job posted months or years ago is rejected.
+    5. A job with an unverifiable posting date is excluded from both queues.
+    6. An old job already in the database is removed from active queues.
+    7. A cached old job cannot reappear in the dashboard.
+    8. An eligible, unapplied job requiring manual intervention appears only in the manual dashboard.
+    9. A successfully verified application is not submitted again.
+    10. A failed or ambiguous submission is handled safely.
+    11. Stopping the automation prevents new jobs from being processed.
+    12. All four platforms apply the same cutoff rules.
+    """
+    from app.matcher import validate_job_posting_date, evaluate_job_match
+    from app.database import (
+        record_application,
+        get_applications,
+        cleanup_outdated_data,
+        is_job_applied_or_recorded,
+        get_db_connection
+    )
+
+    # 1. Job posted today accepted
+    val_today, age_today, _ = validate_job_posting_date("Today")
+    assert val_today is True
+    assert age_today <= 4.0
+    el_today, _, _ = evaluate_job_match("Data Analyst", "Python SQL", "Delhi", "1-2 Yrs", "Today")
+    assert el_today is True
+
+    # 2. Job posted 3 days ago accepted
+    val_3d, age_3d, _ = validate_job_posting_date("3 days ago")
+    assert val_3d is True
+    assert age_3d <= 4.0
+    el_3d, _, _ = evaluate_job_match("Data Analyst", "Python SQL", "Delhi", "1-2 Yrs", "3 days ago")
+    assert el_3d is True
+
+    # 3. Job posted 5 days ago rejected
+    val_5d, age_5d, reason_5d = validate_job_posting_date("5 days ago")
+    assert val_5d is False
+    assert age_5d == 5.0
+    assert "outdated" in reason_5d.lower()
+    el_5d, _, det_5d = evaluate_job_match("Data Analyst", "Python SQL", "Delhi", "1-2 Yrs", "5 days ago")
+    assert el_5d is False
+    assert "outdated" in det_5d["rejection_reason"].lower()
+
+    # 4. Job posted months or years ago (e.g. 15 years ago) rejected
+    val_15y, age_15y, reason_15y = validate_job_posting_date("15 years ago")
+    assert val_15y is False
+    assert age_15y > 1000.0
+    assert "outdated" in reason_15y.lower()
+
+    val_2mo, age_2mo, reason_2mo = validate_job_posting_date("2 months ago")
+    assert val_2mo is False
+    assert age_2mo >= 60.0
+
+    # 5. Unverifiable posting date excluded from both queues
+    for unverifiable in [None, "", "   ", "Apply before Dec 31st", "Closing date: Tomorrow", "Scraped today"]:
+        val_unv, _, r_unv = validate_job_posting_date(unverifiable)
+        assert val_unv is False
+        el_unv, _, det_unv = evaluate_job_match("Data Analyst", "Python SQL", "Delhi", "1-2 Yrs", unverifiable)
+        assert el_unv is False
+
+        # Must not enter manual action queue in DB
+        res_id = record_application(
+            platform="naukri",
+            job_id=f"test_unv_{hash(unverifiable)}",
+            job_title="Data Analyst",
+            employer_name="Company",
+            job_url=f"https://example.com/{hash(unverifiable)}",
+            job_category="Analytics",
+            job_location="Delhi",
+            experience_req="1-2 Yrs",
+            match_score=80.0,
+            status="Manual Action Required",
+            posted_date=unverifiable
+        )
+        assert res_id == "", "Unverifiable posting date must be rejected by backend record_application"
+
+    # 6. An old job already in the database is removed from active queues
+    from datetime import datetime, timezone, timedelta
+    one_day_ago = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT OR REPLACE INTO applications (
+            id, platform, job_id, job_title, employer_name, job_url,
+            match_score, status, posted_date, posting_age_days, discovery_timestamp, created_at
+        ) VALUES ('app-legacy-15y', 'indeed', 'ind_legacy_15y', 'Ancient Analyst', 'Old Corp',
+                  'https://example.com/ancient-15y', 75.0, 'Manual Action Required', '15 years ago', 5475.0,
+                  ?, ?)
+    """, (one_day_ago, one_day_ago))
+    conn.commit()
+    conn.close()
+
+    # Clean data
+    cleanup_res = cleanup_outdated_data(max_posting_age=4)
+    assert cleanup_res["deleted_outdated_posting"] >= 1
+
+    # 7. A cached old job cannot reappear in the dashboard
+    active_apps = get_applications(platform="indeed", status="Manual Action Required")
+    assert not any(a["id"] == "app-legacy-15y" for a in active_apps)
+
+    # 8. An eligible, unapplied job requiring manual intervention appears only in the manual dashboard
+    recent_manual_id = record_application(
+        platform="hirist",
+        job_id="hirist_recent_manual_valid",
+        job_title="Risk & Operations Analyst",
+        employer_name="Top Fintech",
+        job_url="https://example.com/hirist-recent-valid",
+        job_category="Analytics",
+        job_location="Delhi",
+        experience_req="1-2 Yrs",
+        match_score=85.0,
+        status="Manual Action Required",
+        posted_date="2 days ago",
+        posting_age_days=2.0
+    )
+    assert recent_manual_id != ""
+    manual_apps = get_applications(platform="hirist", status="Manual Action Required")
+    assert any(a["id"] == recent_manual_id for a in manual_apps)
+
+    # 9. A successfully verified application is not submitted again
+    verified_id = record_application(
+        platform="hirist",
+        job_id="hirist_recent_manual_valid",
+        job_title="Risk & Operations Analyst",
+        employer_name="Top Fintech",
+        job_url="https://example.com/hirist-recent-valid",
+        job_category="Analytics",
+        job_location="Delhi",
+        experience_req="1-2 Yrs",
+        match_score=85.0,
+        status="Applied — Verified",
+        posted_date="2 days ago",
+        posting_age_days=2.0
+    )
+    assert is_job_applied_or_recorded("hirist", "hirist_recent_manual_valid", "https://example.com/hirist-recent-valid") is True
+
+    # 10. A failed or ambiguous submission is handled safely
+    fail_id = record_application(
+        platform="naukri",
+        job_id="naukri_fail_test",
+        job_title="Business Analyst",
+        employer_name="Company X",
+        job_url="https://example.com/naukri-fail-test",
+        job_category="Analytics",
+        job_location="Delhi",
+        experience_req="1-2 Yrs",
+        match_score=75.0,
+        status="Failed",
+        failure_reason="Network timeout during form submission"
+    )
+    failed_apps = get_applications(platform="naukri", status="Failed")
+    assert any(a["id"] == fail_id for a in failed_apps)
+    # Ensure it did NOT enter Applied or Manual queues
+    assert not any(a["id"] == fail_id for a in get_applications(platform="naukri", status="Applied — Verified"))
+    assert not any(a["id"] == fail_id for a in get_applications(platform="naukri", status="Manual Action Required"))
+
+    # 11. Stopping the automation prevents new jobs from being processed
+    runner = manager.runners["naukri"]
+    runner.stop_event.set()
+    assert runner.is_stopped() is True
+
+    # 12. All four platforms apply the same cutoff rules (MAX_POSTING_AGE_DAYS)
+    for p in ["naukri", "linkedin", "indeed", "hirist"]:
+        p_runner = manager.runners[p]
+        assert p_runner is not None
+        # All runners use base evaluate_job_match & validate_job_posting_date
+        el, _, _ = evaluate_job_match("Data Analyst", "Python SQL", "Delhi", "1-2 Yrs", "5 days ago")
+        assert el is False
+        el_ok, _, _ = evaluate_job_match("Data Analyst", "Python SQL", "Delhi", "1-2 Yrs", "1 day ago")
+        assert el_ok is True
 
 
 

@@ -325,10 +325,11 @@ function renderApplicationsTable(apps) {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
         </div>
-      `;
     } else if (app.status === "Applied — Verified") {
       actionCell = `<span style="color: var(--emerald); font-size: 0.75rem; font-weight: 600;">✓ Verified</span>`;
     }
+
+    const postedLabel = app.posted_date ? `<div style="font-size: 0.74rem; color: #818cf8; font-weight: 600; margin-bottom: 2px;">📅 ${escapeHtml(app.posted_date)}</div>` : `<div style="font-size: 0.72rem; color: #94a3b8;">📅 Verified &le; 4d</div>`;
 
     return `
       <tr>
@@ -345,7 +346,10 @@ function renderApplicationsTable(apps) {
         </td>
         <td style="max-width: 240px; font-size: 0.75rem; color: #cbd5e1;">${escapeHtml(app.verification_result || app.failure_reason || "-")}</td>
         <td>${actionCell}</td>
-        <td style="font-family: var(--font-mono); font-size: 0.72rem; color: #64748b;">${dateStr}</td>
+        <td>
+          ${postedLabel}
+          <div style="font-family: var(--font-mono); font-size: 0.68rem; color: #64748b;">Added: ${dateStr}</div>
+        </td>
       </tr>
     `;
   }).join("");

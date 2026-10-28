@@ -162,6 +162,67 @@ def parse_posting_age_days(text: Optional[str]) -> Optional[float]:
 
     return None
 
+def validate_job_posting_date(
+    posted_date_text: Optional[str],
+    max_age_days: int = MAX_POSTING_AGE_DAYS,
+    discovery_timestamp: Optional[str] = None
+) -> Tuple[bool, Optional[float], str]:
+    """
+    Centralized job-posting date validation function.
+    Mandatory gatekeeper: Runs before any job can enter either the automatic
+    application pipeline or the manual-application dashboard.
+
+    Requirements:
+    - Default max age: 4 days (configurable via MAX_POSTING_AGE_DAYS).
+    - Accepts only verified original posting date within cutoff.
+    - Rejects listings older than cutoff (weeks, months, years ago).
+    - Distinguishes original posting dates from closing/expiry/modification/scraped dates.
+    - Accurately normalizes relative labels ('Today', '1 day ago', '3 days ago') and absolute dates.
+    - Takes discovery_timestamp into account so old relative postings cannot be treated as permanently fresh.
+    - If date is missing, invalid, or unverifiable, returns is_valid=False.
+
+    Returns:
+        (is_valid: bool, posting_age_days: Optional[float], reason: str)
+    """
+    if not posted_date_text or not str(posted_date_text).strip():
+        return False, None, "Posting date is missing or cannot be verified"
+
+    clean = str(posted_date_text).strip().lower()
+
+    # Reject if only modification/scraping date is present without original posting date
+    if any(k in clean for k in ["scraped", "discovered", "updated on", "modified on", "refreshed"]):
+        if not any(k in clean for k in ["posted", "published", "created"]):
+            return False, None, "Modification or scraping date cannot be used as original posting date"
+
+    base_age = parse_posting_age_days(posted_date_text)
+
+    if base_age is None:
+        return False, None, "Posting date cannot be reliably verified or has an unrecognized format"
+
+    # If discovery_timestamp is provided, account for elapsed days since initial discovery
+    effective_age = base_age
+    if discovery_timestamp:
+        try:
+            # Parse discovery timestamp
+            disc_clean = discovery_timestamp.replace("Z", "+00:00")
+            disc_dt = datetime.fromisoformat(disc_clean)
+            if disc_dt.tzinfo is None:
+                disc_dt = disc_dt.replace(tzinfo=timezone.utc)
+            now_dt = datetime.now(timezone.utc)
+            elapsed_days = max(0.0, (now_dt - disc_dt).total_seconds() / 86400.0)
+            # Only add elapsed days if the original date was relative
+            # (Absolute dates already calculate diff from current date)
+            is_relative = any(k in clean for k in ["ago", "today", "yesterday", "now", "just", "hour", "hr", "minute", "min", "d", "w", "m", "y"])
+            if is_relative:
+                effective_age = base_age + elapsed_days
+        except Exception:
+            pass
+
+    if effective_age > float(max_age_days):
+        return False, effective_age, f"Job posting is outdated ({effective_age:.1f} days ago, maximum allowed is {max_age_days} days)"
+
+    return True, effective_age, f"Posting date verified ({effective_age:.1f} days ago)"
+
 def parse_experience_years(text: str) -> Tuple[Optional[float], Optional[float]]:
     """Extract minimum and maximum experience required from text (e.g. '1-3 yrs', '2+ years')."""
     if not text:
@@ -192,23 +253,15 @@ def evaluate_job_match(
 ) -> Tuple[bool, float, Dict[str, Any]]:
     """
     Evaluates job eligibility and computes transparent match score (0-100).
-    Enforces Job Posting Date Filter (posted within last 3-4 days).
+    Enforces centralized Job Posting Date Filter (posted within last 3-4 days).
     Returns (is_eligible, match_score, evaluation_details).
     """
-    # 1. Posting Date Filter Check (Requirement 1)
-    posting_age = parse_posting_age_days(posted_date_text)
-    if posting_age is None:
+    # 1. Centralized Posting Date Filter Check (Priority 1)
+    is_date_valid, posting_age, date_reason = validate_job_posting_date(posted_date_text, MAX_POSTING_AGE_DAYS)
+    if not is_date_valid:
         return False, 0.0, {
             "eligible": False,
-            "rejection_reason": f"Posting date is missing or cannot be verified (only jobs posted within last {MAX_POSTING_AGE_DAYS} days are eligible)",
-            "posting_age_days": None,
-            "breakdown": {"role_match": 0, "skills_match": 0, "exp_match": 0, "location_match": 0}
-        }
-
-    if posting_age > MAX_POSTING_AGE_DAYS:
-        return False, 0.0, {
-            "eligible": False,
-            "rejection_reason": f"Job posting is outdated ({posting_age:.1f} days ago, maximum allowed is {MAX_POSTING_AGE_DAYS} days)",
+            "rejection_reason": date_reason,
             "posting_age_days": posting_age,
             "breakdown": {"role_match": 0, "skills_match": 0, "exp_match": 0, "location_match": 0}
         }

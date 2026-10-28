@@ -11,13 +11,22 @@ from app.database import (
     is_job_applied_or_recorded,
     cleanup_outdated_data
 )
-from app.matcher import evaluate_job_match, normalize_job_url, get_profile, get_resume_text, validate_job_posting_date
+from app.matcher import (
+    evaluate_job_match,
+    normalize_job_url,
+    get_profile,
+    get_resume_text,
+    validate_job_posting_date,
+    prepare_applicant_packet,
+    validate_job_identity
+)
 from app.config import (
     BROWSER_PROFILES_DIR,
     REQUEST_TIMEOUT_SECONDS,
     MAX_DISCOVERED_JOBS_PER_RUN,
     BATCH_SIZE,
-    RESUME_PATH
+    RESUME_PATH,
+    MAX_POSTING_AGE_DAYS
 )
 
 logger = logging.getLogger(__name__)
@@ -34,14 +43,7 @@ class BasePlatformRunner(ABC):
 
     def prepare_applicant_data(self) -> Dict[str, Any]:
         """Loads, parses, and validates candidate profile and resume file for auto-apply form filling."""
-        profile = get_profile()
-        resume_file = Path(RESUME_PATH)
-        has_resume = resume_file.exists() and resume_file.stat().st_size > 0
-        resume_text = get_resume_text() if has_resume else ""
-
-        personal = profile.get("personal", {})
-        education = profile.get("education", {})
-        preferences = profile.get("preferences", {})
+        return prepare_applicant_packet(resume_path=RESUME_PATH)
 
         return {
             "full_name": personal.get("full_name", "Mohit Kumar"),
@@ -215,42 +217,34 @@ class BasePlatformRunner(ABC):
             current_step_details="Checking duplicates and matching against resume..."
         )
 
-        # 0. Centralized Job Posting Date Filter (Priority 1)
-        posted_date = job.get("posted_date")
-        is_date_valid, posting_age, date_reason = validate_job_posting_date(posted_date)
-        if not is_date_valid:
-            logger.info(f"Skipping outdated/unverified job ({posted_date}): {title} — {date_reason}")
+        # Centralized Job Identity, URL, and Date Validation (Priority 2 & 3)
+        is_ident_valid, ident_reason, val_data = validate_job_identity(
+            job=job,
+            platform=self.platform_id,
+            check_remote=False,
+            max_age_days=MAX_POSTING_AGE_DAYS
+        )
+        if not is_ident_valid:
+            logger.info(f"Skipping invalid/unverified job ({title} at {company}): {ident_reason}")
             update_platform_metric(
                 self.platform_id,
-                current_step_details=f"Date rejected: {date_reason[:45]}"
+                current_step_details=f"Rejected: {ident_reason[:45]}"
             )
             return
 
-        # 1. Deduplication check
+        job_url = val_data["job_url"]
+        job_id = val_data["job_id"] or job_id
+        match_score = val_data["match_score"]
+        match_details = val_data["match_details"]
+        posted_date = val_data["posted_date"]
+
+        # Deduplication check
         if is_job_applied_or_recorded(self.platform_id, job_id, job_url):
             logger.info(f"Skipping duplicate: {title} ({job_url})")
             update_platform_metric(
                 self.platform_id,
                 duplicates_skipped_inc=1,
                 current_step_details=f"Skipping duplicate: {title[:30]}"
-            )
-            return
-
-        # 2. Match evaluation against resume & preferences
-        is_eligible, match_score, match_details = evaluate_job_match(
-            title=title,
-            description=description,
-            location=location,
-            experience_text=exp_req,
-            posted_date_text=posted_date
-        )
-
-        if not is_eligible:
-            reason = match_details.get("rejection_reason", "Criteria threshold not met")
-            logger.info(f"Job not eligible/outdated ({match_score}%): {title} — {reason}")
-            update_platform_metric(
-                self.platform_id,
-                current_step_details=f"Skipping: {reason[:45]}"
             )
             return
 

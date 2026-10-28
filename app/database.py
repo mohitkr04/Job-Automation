@@ -1,4 +1,5 @@
 import sqlite3
+import re
 import json
 import csv
 import io
@@ -8,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from app.config import DB_PATH, LOGS_DIR, CLEANUP_RETENTION_DAYS, MAX_POSTING_AGE_DAYS
-from app.matcher import validate_job_posting_date
+from app.matcher import validate_job_posting_date, normalize_job_url, extract_platform_job_id
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +120,11 @@ def record_application(
     posted_date: Optional[str] = None,
     posting_age_days: Optional[float] = None
 ) -> str:
-    # Centralized Posting Date Check:
-    # Any job entering the active manual action queue MUST pass centralized date validation (<= 4 days)
+    # 0. Canonicalize job URL
+    job_url = normalize_job_url(job_url)
+
+    # 1. Centralized Posting Date and Identity Check:
+    # Any job entering the active manual action queue MUST pass centralized validation
     if status == "Manual Action Required":
         is_date_valid, computed_age, date_reason = validate_job_posting_date(posted_date)
         if not is_date_valid:
@@ -128,6 +132,33 @@ def record_application(
                 f"REJECTED entry into Manual Action queue for '{job_title}' ({platform}): {date_reason}"
             )
             return ""
+
+        # Identity and URL safety check for LinkedIn
+        if platform == "linkedin":
+            url_job_id = extract_platform_job_id("linkedin", job_url)
+            clean_record_id = re.sub(r'^[a-z]+_', '', job_id or '')
+
+            # The URL must point to an individual job view listing
+            if not url_job_id:
+                logger.warning(
+                    f"REJECTED entry into Manual Action queue for '{job_title}' ({platform}): URL does not point to an individual job listing ('{job_url}')"
+                )
+                return ""
+
+            # Check for legacy synthetic or expired 7-digit IDs
+            if url_job_id.startswith("40292") or len(url_job_id) < 8:
+                logger.warning(
+                    f"REJECTED entry into Manual Action queue for '{job_title}' ({platform}): invalid or legacy job ID '{url_job_id}'"
+                )
+                return ""
+
+            # If record ID is present, URL ID and record ID must match
+            if clean_record_id and url_job_id != clean_record_id:
+                logger.warning(
+                    f"REJECTED entry into Manual Action queue for '{job_title}' ({platform}): URL job ID '{url_job_id}' does not match record job ID '{clean_record_id}'"
+                )
+                return ""
+
         if posting_age_days is None and computed_age is not None:
             posting_age_days = computed_age
     elif status == "Applied — Verified":
@@ -290,6 +321,16 @@ def get_applications(
             is_valid, age_days, _ = validate_job_posting_date(app_dict.get("posted_date"), max_posting_age, discovery_timestamp=disc_ts)
             if not is_valid:
                 continue
+
+            # Additional identity & URL validation for manual action queue
+            if app_dict.get("platform") == "linkedin":
+                url_id = extract_platform_job_id("linkedin", app_dict.get("job_url", ""))
+                clean_rec_id = re.sub(r'^[a-z]+_', '', app_dict.get("job_id", "") or "")
+                if not url_id or url_id.startswith("40292") or len(url_id) < 8 or "trk=expired_jd_redirect" in (app_dict.get("job_url") or ""):
+                    continue
+                if clean_rec_id and url_id != clean_rec_id:
+                    continue
+
             if app_dict.get("posting_age_days") is None and age_days is not None:
                 app_dict["posting_age_days"] = age_days
         valid_apps.append(app_dict)
@@ -413,17 +454,21 @@ def cleanup_outdated_data(
     cutoff_dt = datetime.now(timezone.utc) - timedelta(days=retention_days)
     cutoff_iso = cutoff_dt.isoformat()
 
-    # 1. Audit all existing 'Manual Action Required' records against centralized date validator
-    cursor.execute("SELECT id, posted_date, posting_age_days, created_at FROM applications WHERE status = 'Manual Action Required'")
+    # 1. Audit all existing 'Manual Action Required' records against centralized date and identity validators
+    cursor.execute("SELECT id, platform, job_id, job_url, posted_date, posting_age_days, created_at FROM applications WHERE status = 'Manual Action Required'")
     manual_rows = cursor.fetchall()
     
     deleted_outdated_posting = 0
     deleted_manual = 0
+    deleted_invalid_identity = 0
     ids_to_delete = set()
     updates_to_make = []
 
     for row in manual_rows:
         row_id = row["id"]
+        platform = row["platform"]
+        job_id = row["job_id"]
+        job_url = row["job_url"]
         created_at = row["created_at"]
         posted_date = row["posted_date"]
         posting_age_days = row["posting_age_days"]
@@ -439,9 +484,27 @@ def cleanup_outdated_data(
         if not is_valid:
             ids_to_delete.add(row_id)
             deleted_outdated_posting += 1
-        else:
-            if posting_age_days != age_days:
-                updates_to_make.append((age_days, row_id))
+            continue
+
+        # Check for invalid legacy synthetic LinkedIn IDs (e.g. 40292xx) or expired redirect URLs
+        if platform == "linkedin":
+            url_id = extract_platform_job_id("linkedin", job_url)
+            clean_rec_id = re.sub(r'^[a-z]+_', '', job_id or '')
+            if not url_id or url_id.startswith("40292") or len(url_id) < 8 or "trk=expired_jd_redirect" in (job_url or "") or (clean_rec_id and url_id != clean_rec_id):
+                ids_to_delete.add(row_id)
+                deleted_invalid_identity += 1
+                continue
+
+        # Check if already applied / verified in database
+        cursor.execute("SELECT id FROM applications WHERE id != ? AND platform = ? AND (job_id = ? OR job_url = ?) AND status = 'Applied — Verified'",
+                       (row_id, platform, job_id, job_url))
+        if cursor.fetchone():
+            ids_to_delete.add(row_id)
+            deleted_invalid_identity += 1
+            continue
+
+        if posting_age_days != age_days:
+            updates_to_make.append((age_days, row_id))
 
     if updates_to_make:
         cursor.executemany("UPDATE applications SET posting_age_days = ? WHERE id = ?", updates_to_make)
@@ -510,6 +573,7 @@ def cleanup_outdated_data(
     return {
         "deleted_manual_records": deleted_manual,
         "deleted_outdated_posting": deleted_outdated_posting,
+        "deleted_invalid_identity": deleted_invalid_identity,
         "deleted_duplicates": deleted_duplicates,
         "deleted_failed_records": deleted_failed,
         "purged_legacy_skips": deleted_skips,

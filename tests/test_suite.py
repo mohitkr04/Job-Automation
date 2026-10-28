@@ -4,6 +4,8 @@ import json
 import asyncio
 from pathlib import Path
 
+from datetime import datetime, timezone
+
 from app.database import (
     init_db,
     record_application,
@@ -11,13 +13,20 @@ from app.database import (
     get_applications,
     get_all_platform_metrics,
     export_applications_csv,
-    export_applications_json
+    export_applications_json,
+    cleanup_outdated_data,
+    update_application_status,
+    get_application_by_id
 )
 from app.matcher import (
     normalize_job_url,
     evaluate_job_match,
     get_resume_text,
-    get_profile
+    get_profile,
+    validate_job_identity,
+    verify_job_url_remote,
+    extract_platform_job_id,
+    validate_job_posting_date
 )
 from app.runner import manager
 
@@ -525,6 +534,297 @@ def test_priority_1_to_5_mandatory_requirements():
         assert el is False
         el_ok, _, _ = evaluate_job_match("Data Analyst", "Python SQL", "Delhi", "1-2 Yrs", "1 day ago")
         assert el_ok is True
+
+
+# -------------------------------------------------------------
+# Priority 6: Automated Regression Tests for Job URL & Identity
+# -------------------------------------------------------------
+
+def test_regression_1_valid_recent_linkedin_job_opens_its_own_listing(monkeypatch):
+    """1. A valid recent LinkedIn job opens its own listing."""
+    from starlette.testclient import TestClient
+    from app.main import app
+
+    app_id = record_application(
+        platform="linkedin",
+        job_id="li_4483210110",
+        job_title="Business Analyst",
+        employer_name="TravClan",
+        job_url="https://www.linkedin.com/jobs/view/4483210110/",
+        job_category="Analytics",
+        job_location="Delhi NCR",
+        experience_req="1-2 Yrs",
+        match_score=92.0,
+        status="Manual Action Required",
+        posted_date="1 day ago",
+        posting_age_days=1.0
+    )
+    assert app_id != ""
+
+    # Mock remote verifier to simulate live valid LinkedIn response
+    monkeypatch.setattr(
+        "app.main.verify_job_url_remote",
+        lambda **kwargs: (True, "Listing verified online", "https://www.linkedin.com/jobs/view/4483210110/")
+    )
+    launched_urls = []
+    monkeypatch.setattr(
+        "app.main.launch_headed_browser",
+        lambda platform, target_url: launched_urls.append((platform, target_url)) or {"status": "ok"}
+    )
+
+    client = TestClient(app)
+    res = client.post(f"/api/applications/{app_id}/open")
+    assert res.status_code == 200
+    assert launched_urls == [("linkedin", "https://www.linkedin.com/jobs/view/4483210110/")]
+
+
+def test_regression_2_job_url_belonging_to_another_job_rejected(monkeypatch):
+    """2. A job URL belonging to another job is rejected."""
+    from starlette.testclient import TestClient
+    from app.main import app
+
+    app_id = record_application(
+        platform="linkedin",
+        job_id="li_4489991111",
+        job_title="Payments & Settlement Analyst",
+        employer_name="Pine Labs",
+        job_url="https://www.linkedin.com/jobs/view/4489991111/",
+        job_category="Analytics",
+        job_location="Noida",
+        experience_req="1-3 Yrs",
+        match_score=88.0,
+        status="Manual Action Required",
+        posted_date="2 days ago",
+        posting_age_days=2.0
+    )
+
+    # Remote verifier detects title/employer mismatch
+    monkeypatch.setattr(
+        "app.main.verify_job_url_remote",
+        lambda **kwargs: (False, "Destination listing 'Sr. Loan Processor at Cornerstone' does not match 'Payments & Settlement Analyst'", None)
+    )
+
+    client = TestClient(app)
+    res = client.post(f"/api/applications/{app_id}/open")
+    assert res.status_code == 410
+    assert "Destination listing" in res.json()["detail"]
+
+    # Record must be marked Listing Unavailable and removed from active manual queue
+    updated = get_application_by_id(app_id)
+    assert updated["status"] == "Listing Unavailable"
+    active_manual = get_applications(status="Manual Action Required")
+    assert not any(a["id"] == app_id for a in active_manual)
+
+
+def test_regression_3_recently_scraped_but_15_year_old_listing_rejected():
+    """3. A recently scraped but 15-year-old listing is rejected."""
+    job = {
+        "title": "Sr. Loan Processor",
+        "company": "Cornerstone Home Lending",
+        "url": "https://www.linkedin.com/jobs/view/4489992222/",
+        "job_id": "li_4489992222",
+        "posted_date": "15 years ago",
+        "discovery_timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    is_valid, reason, _ = validate_job_identity(job, "linkedin", check_remote=False)
+    assert is_valid is False
+    assert "outdated" in reason or "rejected" in reason
+
+    rec_id = record_application(
+        platform="linkedin",
+        job_id="li_4489992222",
+        job_title="Sr. Loan Processor",
+        employer_name="Cornerstone Home Lending",
+        job_url="https://www.linkedin.com/jobs/view/4489992222/",
+        job_category="Analytics",
+        job_location="Remote",
+        experience_req="1-2 Yrs",
+        match_score=85.0,
+        status="Manual Action Required",
+        posted_date="15 years ago"
+    )
+    assert rec_id == ""
+
+
+def test_regression_4_closed_job_excluded_from_active_queues():
+    """4. A closed job is excluded from active queues."""
+    is_valid, reason, _ = verify_job_url_remote(
+        platform="linkedin",
+        job_url="https://www.linkedin.com/jobs/view/payments-settlement-pinelabs-4029232",
+        expected_title="Payments & Settlement Analyst",
+        expected_employer="Pine Labs",
+        expected_job_id="li_4029232"
+    )
+    assert is_valid is False
+
+    app_id = record_application(
+        platform="linkedin",
+        job_id="li_4489993333",
+        job_title="Business Analyst",
+        employer_name="TravClan",
+        job_url="https://www.linkedin.com/jobs/loan-coordinator-jobs?trk=expired_jd_redirect",
+        job_category="Analytics",
+        job_location="Delhi",
+        experience_req="1-2 Yrs",
+        match_score=85.0,
+        status="Manual Action Required",
+        posted_date="1 day ago"
+    )
+    assert app_id == ""
+
+
+def test_regression_5_invalid_or_missing_job_id_handled_safely():
+    """5. An invalid or missing job ID is handled safely."""
+    generic_job = {
+        "title": "Junior Data Analyst",
+        "company": "Swiggy",
+        "url": "https://www.linkedin.com/jobs/search?keywords=Data%20Analyst",
+        "job_id": None,
+        "posted_date": "1 day ago",
+        "experience": "1-2 Yrs"
+    }
+    is_valid, reason, _ = validate_job_identity(generic_job, "linkedin", check_remote=False)
+    assert is_valid is False
+    assert "individual job identifier" in reason
+
+    legacy_job = {
+        "title": "Payments Analyst",
+        "company": "Pine Labs",
+        "url": "https://www.linkedin.com/jobs/view/payments-analyst-4029232",
+        "job_id": "li_4029232",
+        "posted_date": "2 days ago",
+        "experience": "1-2 Yrs"
+    }
+    is_valid2, reason2, _ = validate_job_identity(legacy_job, "linkedin", check_remote=False)
+    assert is_valid2 is False
+    assert "legacy synthetic job ID" in reason2
+
+
+def test_regression_6_stale_cached_record_cannot_reappear():
+    """6. A stale cached record cannot reappear."""
+    import sqlite3
+    from app.config import DB_PATH
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        INSERT OR REPLACE INTO applications (
+            id, platform, job_id, job_title, employer_name, job_url,
+            job_category, job_location, experience_req, match_score,
+            discovery_timestamp, status, created_at, posted_date, posting_age_days
+        ) VALUES (
+            'test_stale_reappear', 'linkedin', 'li_4029232', 'Payments & Settlement Analyst',
+            'Pine Labs', 'https://www.linkedin.com/jobs/view/payments-settlement-pinelabs-4029232',
+            'Analytics', 'Noida', '1-3 Yrs', 90.0, '2026-10-28T05:00:00Z',
+            'Manual Action Required', '2026-10-28T05:00:00Z', '2 days ago', 2.0
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    apps = get_applications(status="Manual Action Required")
+    assert not any(a["id"] == "test_stale_reappear" for a in apps)
+
+    stats = cleanup_outdated_data()
+    assert stats["deleted_invalid_identity"] >= 1
+
+    reintro_id = record_application(
+        platform="linkedin",
+        job_id="li_4029232",
+        job_title="Payments & Settlement Analyst",
+        employer_name="Pine Labs",
+        job_url="https://www.linkedin.com/jobs/view/payments-settlement-pinelabs-4029232",
+        job_category="Analytics",
+        job_location="Noida",
+        experience_req="1-3 Yrs",
+        match_score=90.0,
+        status="Manual Action Required",
+        posted_date="2 days ago"
+    )
+    assert reintro_id == ""
+
+
+def test_regression_7_open_button_uses_selected_records_validated_url(monkeypatch):
+    """7. The Open button uses the selected record's validated URL."""
+    from starlette.testclient import TestClient
+    from app.main import app
+
+    app_id = record_application(
+        platform="linkedin",
+        job_id="li_4483556411",
+        job_title="Senior Business Analyst",
+        employer_name="noon",
+        job_url="https://in.linkedin.com/jobs/view/senior-business-analyst-at-noon-4483556411?refId=123",
+        job_category="Analytics",
+        job_location="Delhi",
+        experience_req="1-3 Yrs",
+        match_score=89.0,
+        status="Manual Action Required",
+        posted_date="1 day ago",
+        posting_age_days=1.0
+    )
+
+    opened_data = {}
+    monkeypatch.setattr(
+        "app.main.verify_job_url_remote",
+        lambda **kwargs: (True, "Listing verified online", "https://www.linkedin.com/jobs/view/4483556411/")
+    )
+    monkeypatch.setattr(
+        "app.main.launch_headed_browser",
+        lambda platform, target_url: opened_data.update({"platform": platform, "url": target_url}) or {"status": "ok"}
+    )
+
+    client = TestClient(app)
+    res = client.post(f"/api/applications/{app_id}/open")
+    assert res.status_code == 200
+    assert opened_data["url"] == "https://www.linkedin.com/jobs/view/4483556411/"
+    assert opened_data["platform"] == "linkedin"
+
+    app_data = get_application_by_id(app_id)
+    assert app_data["status"] == "Manual Action Required"
+
+
+def test_regression_8_other_platforms_continue_to_work_independently():
+    """8. Other platforms continue to work independently."""
+    for plat in ["naukri", "indeed", "hirist"]:
+        runner = manager.runners[plat]
+        assert runner is not None
+        plat_apps = get_applications(platform=plat, status="Manual Action Required")
+        assert len(plat_apps) > 0, f"Expected active manual listings for {plat}"
+        for a in plat_apps:
+            assert a["platform"] == plat
+            assert a["job_url"] != ""
+            assert a["posting_age_days"] <= 4.0
+
+
+def test_regression_9_existing_verified_application_history_remains_intact():
+    """9. Existing verified application history remains intact."""
+    verified_before = get_applications(status="Applied — Verified")
+    assert len(verified_before) >= 3
+
+    cleanup_outdated_data(retention_days=1)
+    cleanup_outdated_data(retention_days=30)
+
+    verified_after = get_applications(status="Applied — Verified")
+    assert len(verified_after) == len(verified_before)
+    verified_ids = {a["id"] for a in verified_after}
+    for orig in verified_before:
+        assert orig["id"] in verified_ids
+
+
+def test_regression_10_frontend_accurately_reflects_backend_validation_results():
+    """10. The frontend accurately reflects backend validation results."""
+    from starlette.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    res = client.get("/api/applications?status=Manual Action Required")
+    assert res.status_code == 200
+    items = res.json()
+    for item in items:
+        if item["platform"] == "linkedin":
+            assert not item["job_id"].startswith("li_40292")
+            assert "4029232" not in item["job_url"]
+        assert item["posting_age_days"] <= 4.0
 
 
 

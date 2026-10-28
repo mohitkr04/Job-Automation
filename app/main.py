@@ -20,7 +20,7 @@ from app.database import (
     delete_application,
     get_application_by_id
 )
-from app.matcher import get_profile, update_profile, get_resume_text
+from app.matcher import get_profile, update_profile, get_resume_text, verify_job_url_remote, normalize_job_url
 from app.runner import manager
 from app.browser_assistant import launch_headed_browser
 
@@ -95,12 +95,39 @@ async def open_application_in_browser(app_id: str):
         raise HTTPException(status_code=404, detail="Application record not found")
     
     url = app_data.get("job_url")
-    platform = app_data.get("platform", "naukri")
+    platform = app_data.get("platform", "linkedin")
     if not url:
         raise HTTPException(status_code=400, detail="Application has no job URL")
 
-    res = launch_headed_browser(platform, target_url=url)
-    return {"status": "ok", "message": f"Opened {app_data.get('job_title')} in {platform} browser session", "details": res}
+    # Safe URL and identity verification before opening
+    is_valid, verify_msg, final_url = verify_job_url_remote(
+        platform=platform,
+        job_url=url,
+        expected_title=app_data.get("job_title"),
+        expected_employer=app_data.get("employer_name"),
+        expected_job_id=app_data.get("job_id")
+    )
+
+    if not is_valid:
+        # Mark as Listing Unavailable in DB so it doesn't linger in active manual queue
+        update_application_status(
+            app_id,
+            "Listing Unavailable",
+            f"Job verification failed: {verify_msg}"
+        )
+        raise HTTPException(
+            status_code=410,
+            detail=f"Cannot open listing: {verify_msg}. Listing has been removed from active manual queue."
+        )
+
+    canonical_url = final_url or normalize_job_url(url)
+    res = launch_headed_browser(platform, target_url=canonical_url)
+    return {
+        "status": "ok",
+        "message": f"Opened {app_data.get('job_title')} in {platform} browser session",
+        "url": canonical_url,
+        "details": res
+    }
 
 @app.post("/api/applications/{app_id}/verify")
 async def mark_application_verified(app_id: str):

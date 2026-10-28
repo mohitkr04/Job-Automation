@@ -187,14 +187,16 @@ async function loginPlatform(platformId) {
 }
 
 async function openApplicationInBrowser(appId) {
-  showToast("Opening job in persistent browser session...");
+  showToast("Verifying and opening job listing in browser session...");
   try {
     const res = await fetch(`/api/applications/${appId}/open`, { method: "POST" });
     const data = await res.json();
     if (res.ok) {
-      showToast("Opened job page in browser. Complete application form.");
+      showToast(data.message || "Opened verified job page in browser.");
     } else {
-      showToast(`Error: ${data.detail || "Could not open"}`);
+      showToast(`Notice: ${data.detail || "Could not open listing"}`);
+      // Refresh the table so unavailable/expired listings are promptly removed from active view
+      await loadApplications();
     }
   } catch (e) {
     showToast(`Network error: ${e.message}`);
@@ -307,7 +309,14 @@ function renderApplicationsTable(apps) {
     const statusClass = getOutcomeClass(app.status);
     const scoreColor = app.match_score >= 80 ? "color: #34d399;" : (app.match_score >= 60 ? "color: #a5b4fc;" : "color: #94a3b8;");
     const dateStr = app.created_at ? new Date(app.created_at).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
-    const jobLink = app.job_url ? `<a href="${app.job_url}" target="_blank" style="color: #818cf8; text-decoration: none; font-weight: 600;">${escapeHtml(app.job_title)}</a>` : escapeHtml(app.job_title);
+    let jobLink = escapeHtml(app.job_title);
+    if (app.job_url) {
+      if (app.status === "Manual Action Required") {
+        jobLink = `<a href="#" onclick="openApplicationInBrowser('${app.id}'); return false;" title="Open verified listing in headed browser" style="color: #818cf8; text-decoration: none; font-weight: 600;">${escapeHtml(app.job_title)}</a>`;
+      } else {
+        jobLink = `<a href="${app.job_url}" target="_blank" style="color: #818cf8; text-decoration: none; font-weight: 600;">${escapeHtml(app.job_title)}</a>`;
+      }
+    }
 
     let actionCell = `<span style="color: var(--text-dim); font-size: 0.72rem;">-</span>`;
     if (app.status === "Manual Action Required") {
@@ -324,7 +333,7 @@ function renderApplicationsTable(apps) {
           <button class="btn-micro btn-dismiss" title="Dismiss from manual queue" onclick="dismissApplication('${app.id}')">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
-        </div>
+        </div>`;
     } else if (app.status === "Applied — Verified") {
       actionCell = `<span style="color: var(--emerald); font-size: 0.75rem; font-weight: 600;">✓ Verified</span>`;
     }

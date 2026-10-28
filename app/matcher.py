@@ -54,33 +54,226 @@ def update_profile(new_data: Dict[str, Any]):
         json.dump(new_data, f, indent=2)
     _CACHED_PROFILE = new_data
 
+def prepare_applicant_packet(resume_path: Optional[str] = None) -> Dict[str, Any]:
+    profile = get_profile()
+    target_path = resume_path if resume_path is not None else RESUME_PATH
+    resume_file = Path(target_path)
+    has_resume = resume_file.exists() and resume_file.stat().st_size > 0
+    resume_text = get_resume_text() if has_resume else ""
+
+    personal = profile.get("personal", {})
+    education = profile.get("education", {})
+    preferences = profile.get("preferences", {})
+
+    return {
+        "full_name": personal.get("full_name", "Mohit Kumar"),
+        "email": personal.get("email", "mohitkrgupta.13.05@gmail.com"),
+        "phone": personal.get("phone", "6299329495"),
+        "current_location": personal.get("current_location", "Delhi"),
+        "linkedin_url": personal.get("linkedin_url", ""),
+        "github_url": personal.get("github_url", ""),
+        "notice_period": preferences.get("notice_period_text", "15 days"),
+        "expected_ctc": preferences.get("expected_ctc_lpa", "9-10 LPA"),
+        "degree": education.get("degree", "B.Tech"),
+        "college": education.get("college_name", ""),
+        "college_marks": education.get("college_percentage", 82.0),
+        "resume_path": str(resume_file) if has_resume else None,
+        "resume_filename": resume_file.name if has_resume else None,
+        "resume_size_bytes": resume_file.stat().st_size if has_resume else 0,
+        "resume_verified": has_resume and len(resume_text) > 200,
+        "experience_years": profile.get("experience", {}).get("total_years", 1.8),
+        "skills": profile.get("skills", [])
+    }
+
+
+def extract_platform_job_id(platform: str, url: str) -> Optional[str]:
+    """Extracts the unique platform job identifier from a URL."""
+    if not url:
+        return None
+    p = platform.lower()
+    clean_url = str(url).strip()
+    if "linkedin" in p or "linkedin.com" in clean_url:
+        m_q = re.search(r'[?&]currentJobId=(\d+)', clean_url)
+        if m_q:
+            return m_q.group(1)
+        m_p = re.search(r'/jobs/view/(?:[^\s/?#]+-)?(\d+)', clean_url)
+        if m_p:
+            return m_p.group(1)
+    elif "indeed" in p or "indeed.com" in clean_url:
+        m = re.search(r'[?&]jk=([a-zA-Z0-9_-]+)', clean_url)
+        if m:
+            return m.group(1)
+    elif "naukri" in p or "naukri.com" in clean_url:
+        m = re.search(r'-(\d+)(?:[?#]|$)', clean_url)
+        if m:
+            return m.group(1)
+    elif "hirist" in p or "hirist.tech" in clean_url or "hirist.com" in clean_url:
+        m = re.search(r'-(\d+)\.html', clean_url)
+        if m:
+            return m.group(1)
+    return None
+
+
 def normalize_job_url(raw_url: str) -> str:
-    """Strip tracking query parameters to ensure reliable deduplication."""
+    """
+    Normalizes a job URL to its canonical form and removes tracking parameters.
+    Preserves essential job identifiers (e.g. converting currentJobId to canonical job view URL).
+    """
     if not raw_url:
         return ""
     try:
-        parsed = urllib.parse.urlparse(raw_url)
-        clean_path = parsed.path.rstrip("/")
+        parsed = urllib.parse.urlparse(raw_url.strip())
+        netloc = parsed.netloc.lower()
+        path = parsed.path.rstrip("/")
+        query_dict = urllib.parse.parse_qs(parsed.query)
+
+        # 1. LinkedIn Canonicalization
+        if "linkedin.com" in netloc:
+            # If currentJobId is present in search or collection query, canonicalize to view URL
+            if "currentJobId" in query_dict:
+                job_id = query_dict["currentJobId"][0]
+                return f"https://www.linkedin.com/jobs/view/{job_id}/"
+            # If path is /jobs/view/...
+            m = re.search(r'/jobs/view/(?:([^\s/?#]+)-)?(\d+)', path)
+            if m:
+                slug, job_id = m.group(1), m.group(2)
+                if slug:
+                    return f"https://www.linkedin.com/jobs/view/{slug}-{job_id}"
+                return f"https://www.linkedin.com/jobs/view/{job_id}/"
+
+        # 2. Indeed Canonicalization
+        if "indeed.com" in netloc:
+            if "jk" in query_dict:
+                jk = query_dict["jk"][0]
+                return f"https://in.indeed.com/viewjob?jk={jk}"
+
+        # Standard stripping for other platforms
         tracking_params = {
             "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
             "ref", "trackingid", "track", "mid", "sid", "f", "rc", "from", "sp",
-            "currentjobid", "position", "pagenumber"
+            "position", "pagenumber", "refid", "lipi", "licu", "trk"
         }
-        query_dict = urllib.parse.parse_qs(parsed.query)
         clean_query = {
             k: v for k, v in query_dict.items() if k.lower() not in tracking_params
         }
         encoded_query = urllib.parse.urlencode(clean_query, doseq=True)
         return urllib.parse.urlunparse((
-            parsed.scheme.lower(),
-            parsed.netloc.lower(),
-            clean_path,
+            parsed.scheme.lower() or "https",
+            netloc,
+            path,
             "",
             encoded_query,
             ""
         ))
     except Exception:
         return raw_url.strip()
+
+
+def verify_job_url_remote(
+    platform: str,
+    job_url: str,
+    expected_title: Optional[str] = None,
+    expected_employer: Optional[str] = None,
+    expected_job_id: Optional[str] = None,
+    timeout_sec: float = 4.0,
+    http_client: Optional[Any] = None
+) -> Tuple[bool, str, Optional[str]]:
+    """
+    Performs safe, lightweight remote URL and redirect verification.
+    - Follows redirects safely (up to 4 hops).
+    - Detects LinkedIn expired redirects (trk=expired_jd_redirect or path redirection away from /jobs/view/).
+    - Detects mismatch between destination job ID and stored job ID.
+    - Detects closed or removed listings (HTTP 404, 410, or closed page notices).
+    - Detects blatant title or employer mismatches from destination metadata.
+    - Safely distinguishes login walls (authwall/login) from expired listings.
+    Returns: (is_valid: bool, reason: str, canonical_url: Optional[str])
+    """
+    import httpx
+
+    if not job_url:
+        return False, "Job URL is missing or empty", None
+
+    canonical_url = normalize_job_url(job_url)
+
+    # Fast validation for synthetic/legacy LinkedIn IDs without needing a network request
+    if platform.lower() == "linkedin":
+        clean_id = extract_platform_job_id("linkedin", canonical_url) or re.sub(r'^[a-z]+_', '', expected_job_id or "")
+        if clean_id and (clean_id.startswith("40292") or len(clean_id) < 8):
+            return False, f"LinkedIn legacy synthetic job ID ({clean_id}) routes to ancient expired job", canonical_url
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    }
+
+    try:
+        def _execute_check(client):
+            resp = client.get(canonical_url, headers=headers)
+            final_url = str(resp.url)
+            status_code = resp.status_code
+            html = resp.text
+
+            # 1. HTTP Status checks
+            if status_code in (404, 410):
+                return False, f"Listing removed or expired (HTTP {status_code})", final_url
+
+            # 2. LinkedIn-specific checks
+            if platform.lower() == "linkedin":
+                if "trk=expired_jd_redirect" in final_url or "expired_jd_redirect" in final_url:
+                    return False, "LinkedIn listing expired (redirected to expired job search)", final_url
+
+                parsed_final = urllib.parse.urlparse(final_url)
+                # If redirected to search/collection page instead of job view or login
+                if "/jobs/view/" not in parsed_final.path:
+                    if any(auth_kw in parsed_final.path for auth_kw in ["/authwall", "/login", "/checkpoint"]):
+                        # Login wall: verify initial URL had valid canonical ID
+                        return True, "Listing valid (login authentication wall)", canonical_url
+                    return False, f"Redirected away from job view to '{parsed_final.path}'", final_url
+
+                # Check destination job ID
+                dest_id = extract_platform_job_id("linkedin", final_url)
+                exp_clean_id = re.sub(r'^[a-z]+_', '', expected_job_id or "")
+                if dest_id and exp_clean_id and dest_id != exp_clean_id:
+                    return False, f"Destination job ID mismatch ({dest_id} != {exp_clean_id})", final_url
+
+                # Check closed indicators in text
+                lower_html = html.lower()
+                closed_indicators = [
+                    "no longer accepting applications",
+                    "this job has expired",
+                    "this job is closed",
+                    "job is no longer available",
+                    "this listing has expired"
+                ]
+                if any(ci in lower_html for ci in closed_indicators):
+                    return False, "Listing is closed or no longer accepting applications", final_url
+
+                # Check title mismatch
+                title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
+                if title_match:
+                    page_title = title_match.group(1).lower()
+                    if "jobs in " in page_title or "open roles" in page_title:
+                        return False, f"Destination is a search results page: '{title_match.group(1)}'", final_url
+
+                    if expected_title:
+                        title_tokens = [w for w in re.split(r'\W+', expected_title.lower()) if len(w) > 3]
+                        employer_tokens = [w for w in re.split(r'\W+', (expected_employer or "").lower()) if len(w) > 2]
+                        if title_tokens and not any(t in page_title for t in title_tokens) and not any(e in page_title for e in employer_tokens):
+                            if "linkedin" not in page_title or len(page_title) > 25:
+                                return False, f"Destination listing '{title_match.group(1)}' does not match '{expected_title}' at '{expected_employer}'", final_url
+
+            return True, "Listing verified online", normalize_job_url(final_url)
+
+        if http_client is not None:
+            return _execute_check(http_client)
+        else:
+            with httpx.Client(timeout=timeout_sec, follow_redirects=True, max_redirects=4) as client:
+                return _execute_check(client)
+
+    except httpx.TimeoutException:
+        return True, "Online verification timed out (tentatively accepted)", canonical_url
+    except Exception as e:
+        return False, f"Verification request failed: {str(e)}", canonical_url
 
 def parse_posting_age_days(text: Optional[str]) -> Optional[float]:
     """
@@ -388,3 +581,122 @@ def evaluate_job_match(
     }
 
     return is_eligible, total_score, details
+
+
+def validate_job_identity(
+    job: Dict[str, Any],
+    platform: str,
+    check_remote: bool = False,
+    max_age_days: int = MAX_POSTING_AGE_DAYS,
+    http_client: Optional[Any] = None
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Centralized job-identity and URL validation function.
+    Mandatory gatekeeper: Runs before adding a job to the database,
+    automatic application queue, or manual-action dashboard.
+
+    Verifications:
+    1. URL format & domain belongs to expected platform.
+    2. URL references an individual listing (not generic search).
+    3. Destination/URL job ID matches record job ID.
+    4. Rejects synthetic/legacy LinkedIn job IDs (e.g. 7-digit 40292xx).
+    5. Verifies original posting date is within max_age_days (<= 4 days).
+       Rejects missing/unverifiable dates and prevents using discovery/scrape time as posting date.
+    6. Verifies remote URL availability and redirects when check_remote is True.
+    7. Evaluates candidate match criteria (skills, experience, seniority).
+
+    Returns:
+        (is_valid: bool, reason: str, validated_data: Dict[str, Any])
+    """
+    title = job.get("title") or job.get("job_title", "")
+    company = job.get("company") or job.get("employer_name", "")
+    raw_url = job.get("url") or job.get("job_url", "")
+    job_id = job.get("job_id", "")
+    posted_date = job.get("posted_date")
+    location = job.get("location") or job.get("job_location", "")
+    experience = job.get("experience") or job.get("experience_req", "")
+    description = job.get("description") or job.get("job_description", "")
+
+    # 1. URL Presence & Basic Formatting
+    if not raw_url or not isinstance(raw_url, str) or not raw_url.strip():
+        return False, "Job URL is missing or empty", {}
+
+    canonical_url = normalize_job_url(raw_url)
+    parsed = urllib.parse.urlparse(canonical_url)
+    netloc = parsed.netloc.lower()
+
+    # 2. Platform Domain Consistency
+    platform_clean = platform.lower()
+    expected_domains = {
+        "linkedin": ["linkedin.com"],
+        "naukri": ["naukri.com"],
+        "indeed": ["indeed.com"],
+        "hirist": ["hirist.tech", "hirist.com"]
+    }
+    allowed_domains = expected_domains.get(platform_clean, [])
+    if allowed_domains and not any(ad in netloc for ad in allowed_domains):
+        return False, f"URL domain mismatch: expected {platform_clean} domain, got '{netloc}'", {}
+
+    # 3. Individual Listing & Job ID Validation
+    extracted_id = extract_platform_job_id(platform_clean, canonical_url)
+    if platform_clean == "linkedin":
+        if not extracted_id:
+            return False, "LinkedIn URL does not contain a valid individual job identifier", {}
+        # Check against legacy 7-digit synthetic IDs
+        if extracted_id.startswith("40292") or len(extracted_id) < 8:
+            return False, f"LinkedIn legacy synthetic job ID '{extracted_id}' is invalid or expired", {}
+        # If record has a job_id, verify it matches
+        clean_record_id = re.sub(r'^[a-z]+_', '', job_id or '')
+        if clean_record_id and extracted_id != clean_record_id:
+            return False, f"Job ID mismatch: URL has '{extracted_id}' but record has '{clean_record_id}'", {}
+
+    # 4. Posting Date Validation (Priority 3: <= 4 days)
+    is_date_valid, computed_age, date_reason = validate_job_posting_date(
+        posted_date,
+        max_age_days=max_age_days
+    )
+    if not is_date_valid:
+        return False, f"Posting date rejected: {date_reason}", {}
+
+    # 5. Remote Availability & Redirect Verification (if requested)
+    if check_remote:
+        is_remote_valid, remote_reason, final_url = verify_job_url_remote(
+            platform=platform_clean,
+            job_url=canonical_url,
+            expected_title=title,
+            expected_employer=company,
+            expected_job_id=job_id,
+            http_client=http_client
+        )
+        if not is_remote_valid:
+            return False, f"Remote verification failed: {remote_reason}", {}
+        if final_url:
+            canonical_url = final_url
+
+    # 6. Candidate Resume & Experience Criteria Match
+    is_eligible, match_score, match_details = evaluate_job_match(
+        title=title,
+        description=description,
+        location=location,
+        experience_text=experience,
+        posted_date_text=posted_date
+    )
+    if not is_eligible:
+        rejection_reason = match_details.get("rejection_reason", "Criteria threshold not met")
+        return False, f"Job match criteria rejected: {rejection_reason}", {}
+
+    validated_data = {
+        "job_id": job_id or (f"{platform_clean}_{extracted_id}" if extracted_id else None),
+        "job_title": title,
+        "employer_name": company,
+        "job_url": canonical_url,
+        "job_location": location,
+        "experience_req": experience,
+        "job_description": description,
+        "posted_date": posted_date,
+        "posting_age_days": computed_age,
+        "match_score": match_score,
+        "match_details": match_details
+    }
+
+    return True, "Job identity and listing verified", validated_data
